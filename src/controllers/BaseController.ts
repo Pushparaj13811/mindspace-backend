@@ -60,7 +60,11 @@ export abstract class BaseController {
    * Handle business logic errors
    */
   protected handleBusinessError(error: Error, set: any) {
-    logger.error('Business logic error', { error: error.message });
+    logger.error('Business logic error', { 
+      error: error.message,
+      stack: error.stack,
+      controller: this.constructor.name
+    });
     
     // Check if this is an OAuth2-related error first
     if (OAuth2ErrorHandler.isOAuth2Error(error)) {
@@ -86,6 +90,14 @@ export abstract class BaseController {
       set.status = HTTP_STATUS.CONFLICT;
       return createErrorResponse(
         HTTP_STATUS.CONFLICT,
+        error.message
+      );
+    }
+    
+    if (error.message.includes('Invalid email or password')) {
+      set.status = HTTP_STATUS.UNAUTHORIZED;
+      return createErrorResponse(
+        HTTP_STATUS.UNAUTHORIZED,
         error.message
       );
     }

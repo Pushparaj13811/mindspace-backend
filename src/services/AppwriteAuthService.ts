@@ -58,7 +58,8 @@ export class AppwriteAuthService implements IAuthService {
       });
       
       if (error instanceof Error) {
-        if (error.message.includes('user_already_exists')) {
+        if (error.message.includes('user_already_exists') || 
+            error.message.includes('A user with the same id, email, or phone already exists')) {
           throw new Error('Account already exists with this email');
         }
       }
@@ -106,6 +107,10 @@ export class AppwriteAuthService implements IAuthService {
       if (error instanceof Error) {
         if (error.message.includes('Invalid credentials') || 
             error.message.includes('user_invalid_credentials')) {
+          throw new Error('Invalid email or password');
+        }
+        if (error.message.includes('missing scope')) {
+          // This error typically means the user doesn't exist or credentials are wrong
           throw new Error('Invalid email or password');
         }
       }
