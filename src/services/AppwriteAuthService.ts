@@ -119,29 +119,42 @@ export class AppwriteAuthService implements IAuthService {
         userId: session.userId 
       });
 
-      // Set session for client
-      sessionClient.setSession(session.secret);
+      // Try to get user data using the admin client instead of session client
+      logger.info('Getting user data using admin client');
       
-      logger.info('Getting user account with session');
-      // Get user account with session
-      const userAccount = await sessionAccount.get();
-      
-      logger.info('User account retrieved', { 
-        userId: userAccount.$id,
-        email: userAccount.email,
-        emailVerification: userAccount.emailVerification
-      });
-      
-      // Transform user data directly from session account (no need for admin API)
-      const user = await this.transformAppwriteUser(userAccount);
-      const tokens = this.transformAppwriteSession(session);
-
-      logger.info('User logged in successfully', { 
-        userId: user.$id, 
-        email: credentials.email 
-      });
-
-      return { user, session: tokens };
+      try {
+        // Use admin client to get user data
+        const adminUser = await this.users.get(session.userId);
+        logger.info('User data retrieved via admin client', { 
+          userId: adminUser.$id,
+          email: adminUser.email
+        });
+        
+        const user = await this.transformAppwriteUser(adminUser);
+        const tokens = this.transformAppwriteSession(session);
+        
+        return { user, session: tokens };
+      } catch (adminError) {
+        logger.error('Failed to get user via admin client', {
+          error: adminError instanceof Error ? adminError.message : 'Unknown error',
+          userId: session.userId
+        });
+        
+        // Fallback: create minimal user object from session
+        const userData = {
+          $id: session.userId,
+          email: credentials.email,
+          name: credentials.email.split('@')[0], // fallback name from email
+          prefs: {},
+          $createdAt: new Date().toISOString(),
+          $updatedAt: new Date().toISOString(),
+        };
+        
+        const user = await this.transformAppwriteUser(userData);
+        const tokens = this.transformAppwriteSession(session);
+        
+        return { user, session: tokens };
+      }
     } catch (error) {
       logger.error('Login failed', { 
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -154,7 +167,16 @@ export class AppwriteAuthService implements IAuthService {
           throw new Error('Invalid email or password');
         }
         if (error.message.includes('missing scope')) {
-          // This error typically means the user doesn't exist or credentials are wrong
+          // This error typically means there's an Appwrite configuration issue
+          // or the user was created with insufficient permissions
+          logger.error('Missing scope error - check Appwrite Auth settings', {
+            error: error.message,
+            email: credentials.email
+          });
+          throw new Error('Authentication service configuration error. Please contact support.');
+        }
+        if (error.message.includes('User not found') || 
+            error.message.includes('user_not_found')) {
           throw new Error('Invalid email or password');
         }
       }
