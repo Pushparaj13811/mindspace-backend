@@ -21,21 +21,27 @@ export class AppwriteAuthService implements IAuthService {
 
   async register(userData: RegisterRequest): Promise<{ user: User; session: AuthTokens }> {
     try {
-      // Create user account
-      const userAccount = await this.users.create(
-        ID.unique(),
-        userData.email,
-        undefined, // phone
-        userData.password,
-        userData.name
-      );
-
-      // Create session
+      // Create session client for registration
       const sessionClient = new Client()
         .setEndpoint(config.appwrite.endpoint)
         .setProject(config.appwrite.projectId);
       
       const sessionAccount = new Account(sessionClient);
+      
+      // Create user account using Account API (not admin Users API)
+      const userAccount = await sessionAccount.create(
+        ID.unique(),
+        userData.email,
+        userData.password,
+        userData.name
+      );
+
+      logger.info('User account created successfully', {
+        userId: userAccount.$id,
+        email: userData.email
+      });
+
+      // Create session immediately after account creation
       const session = await sessionAccount.createEmailPasswordSession(
         userData.email,
         userData.password
@@ -59,7 +65,7 @@ export class AppwriteAuthService implements IAuthService {
         });
       }
 
-      // Get user with preferences
+      // Get user with preferences using the session
       const user = await this.transformAppwriteUser(userAccount);
       const tokens = this.transformAppwriteSession(session);
 
@@ -77,7 +83,9 @@ export class AppwriteAuthService implements IAuthService {
       
       if (error instanceof Error) {
         if (error.message.includes('user_already_exists') || 
-            error.message.includes('A user with the same id, email, or phone already exists')) {
+            error.message.includes('A user with the same id, email, or phone already exists') ||
+            error.message.includes('account_already_exists') ||
+            error.message.includes('user_email_already_exists')) {
           throw new Error('Account already exists with this email');
         }
       }
@@ -88,26 +96,44 @@ export class AppwriteAuthService implements IAuthService {
 
   async login(credentials: LoginRequest): Promise<{ user: User; session: AuthTokens }> {
     try {
+      logger.info('Attempting login', { 
+        email: credentials.email,
+        endpoint: config.appwrite.endpoint,
+        projectId: config.appwrite.projectId
+      });
+
       const sessionClient = new Client()
         .setEndpoint(config.appwrite.endpoint)
         .setProject(config.appwrite.projectId);
       
       const sessionAccount = new Account(sessionClient);
+      
+      logger.info('Creating email password session');
       const session = await sessionAccount.createEmailPasswordSession(
         credentials.email,
         credentials.password
       );
+      
+      logger.info('Session created successfully', { 
+        sessionId: session.$id,
+        userId: session.userId 
+      });
 
       // Set session for client
       sessionClient.setSession(session.secret);
       
+      logger.info('Getting user account with session');
       // Get user account with session
       const userAccount = await sessionAccount.get();
       
-      // Also get user from admin client for complete data
-      const adminUser = await this.users.get(userAccount.$id);
+      logger.info('User account retrieved', { 
+        userId: userAccount.$id,
+        email: userAccount.email,
+        emailVerification: userAccount.emailVerification
+      });
       
-      const user = await this.transformAppwriteUser(adminUser);
+      // Transform user data directly from session account (no need for admin API)
+      const user = await this.transformAppwriteUser(userAccount);
       const tokens = this.transformAppwriteSession(session);
 
       logger.info('User logged in successfully', { 
