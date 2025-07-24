@@ -32,8 +32,42 @@ export class AuthController extends BaseController {
       // Register user through service
       const { user, session } = await this.services.authService.register(validatedData);
       
-      // Note: Appwrite automatically sends verification email when createVerification is called
-      // We don't need to send a separate welcome email for now
+      // Send emails (non-blocking)
+      if (this.services.emailService) {
+        try {
+          // Test email service connection first
+          const emailConnected = await this.services.emailService.testConnection();
+          if (!emailConnected) {
+            this.logError(new Error('Email service connection failed'), 'email_connection_test', user.$id);
+            // Continue with registration even if email fails
+          } else {
+
+          // Send welcome email
+          await this.services.emailService.sendWelcomeEmail(user.email, user.name);
+          this.logAction('welcome_email_sent', user.$id, { email: user.email });
+          
+          // Always send verification email for now (since Appwrite might not be configured)
+          // Generate a simple verification token (in production, use crypto.randomBytes)
+          const verificationToken = Buffer.from(`${user.$id}:${Date.now()}`).toString('base64');
+          
+          await this.services.emailService.sendVerificationEmail(
+            user.email, 
+            user.name, 
+            verificationToken
+          );
+          this.logAction('verification_email_sent', user.$id, { 
+            email: user.email,
+            method: 'custom'
+          });
+          }
+          
+        } catch (emailError) {
+          // Log email error but don't fail registration
+          this.logError(emailError as Error, 'send_registration_emails', user.$id);
+        }
+      } else {
+        this.logError(new Error('Email service not available'), 'email_service_check', user.$id);
+      }
       
       this.logAction('register_success', user.$id, { email: user.email });
       

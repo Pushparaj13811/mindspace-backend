@@ -51,23 +51,28 @@ export class AppwriteAuthService implements IAuthService {
       sessionClient.setSession(session.secret);
       
       // Trigger email verification
+      let appwriteVerificationSent = false;
       try {
         await sessionAccount.createVerification(`${config.app.frontendUrl}/verify-email`);
-        logger.info('Verification email triggered', { 
+        appwriteVerificationSent = true;
+        logger.info('Appwrite verification email triggered', { 
           userId: userAccount.$id, 
           email: userData.email 
         });
       } catch (verificationError) {
         // Log but don't fail registration if verification email fails
-        logger.error('Failed to trigger verification email', {
+        logger.error('Failed to trigger Appwrite verification email', {
           error: verificationError instanceof Error ? verificationError.message : 'Unknown error',
           userId: userAccount.$id
         });
       }
-
+      
       // Get user with preferences using the session
       const user = await this.transformAppwriteUser(userAccount);
       const tokens = this.transformAppwriteSession(session);
+      
+      // Add verification status to user object for controller use
+      (user as any).appwriteVerificationSent = appwriteVerificationSent;
 
       logger.info('User registered successfully', { 
         userId: user.$id, 
