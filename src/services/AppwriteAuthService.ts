@@ -1,6 +1,6 @@
 import { Client, Account, Users, ID } from 'node-appwrite';
 import type { IAuthService } from '../interfaces/IAuthService.js';
-import type { User, AuthTokens, LoginRequest, RegisterRequest } from '../types/index.js';
+import type { User, AuthTokens, LoginRequest, RegisterRequest, OAuth2Session } from '../types/index.js';
 import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
 
@@ -82,9 +82,13 @@ export class AppwriteAuthService implements IAuthService {
       // Set session for client
       sessionClient.setSession(session.secret);
       
-      // Get user account
+      // Get user account with session
       const userAccount = await sessionAccount.get();
-      const user = await this.transformAppwriteUser(userAccount);
+      
+      // Also get user from admin client for complete data
+      const adminUser = await this.users.get(userAccount.$id);
+      
+      const user = await this.transformAppwriteUser(adminUser);
       const tokens = this.transformAppwriteSession(session);
 
       logger.info('User logged in successfully', { 
@@ -392,6 +396,207 @@ export class AppwriteAuthService implements IAuthService {
       }
       
       throw new Error('Failed to delete account');
+    }
+  }
+
+  // OAuth2 methods
+  async createOAuth2Session(provider: string, successUrl?: string, failureUrl?: string): Promise<string> {
+    try {
+      // Validate provider
+      if (!provider || provider !== 'google') {
+        throw new Error('Only Google OAuth2 provider is supported');
+      }
+
+      // Set default URLs if not provided
+      const defaultSuccessUrl = `${config.app.frontendUrl}/auth/oauth/success`;
+      const defaultFailureUrl = `${config.app.frontendUrl}/auth/oauth/error`;
+      
+      const finalSuccessUrl = successUrl || defaultSuccessUrl;
+      const finalFailureUrl = failureUrl || defaultFailureUrl;
+
+      // Create OAuth2 token using Appwrite
+      const redirectUrl = await this.account.createOAuth2Token(
+        provider as any,
+        finalSuccessUrl,
+        finalFailureUrl
+      );
+
+      logger.info('OAuth2 session created', { 
+        provider, 
+        successUrl: finalSuccessUrl, 
+        failureUrl: finalFailureUrl 
+      });
+
+      return redirectUrl;
+    } catch (error) {
+      logger.error('Failed to create OAuth2 session', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        provider 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('provider_not_configured')) {
+          throw new Error('OAuth2 provider not configured in Appwrite');
+        }
+        if (error.message.includes('Only Google OAuth2 provider is supported')) {
+          throw error;
+        }
+      }
+      
+      throw new Error('Failed to create OAuth2 session');
+    }
+  }
+
+  async handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens }> {
+    try {
+      if (!userId || !secret) {
+        throw new Error('OAuth2 callback requires userId and secret');
+      }
+
+      // Create session client with the OAuth2 session
+      const sessionClient = new Client()
+        .setEndpoint(config.appwrite.endpoint)
+        .setProject(config.appwrite.projectId)
+        .setSession(secret);
+      
+      const sessionAccount = new Account(sessionClient);
+      
+      // Get user account and session info
+      const userAccount = await sessionAccount.get();
+      const sessionInfo = await sessionAccount.getSession('current');
+      
+      // Verify the userId matches
+      if (userAccount.$id !== userId) {
+        throw new Error('OAuth2 callback userId mismatch');
+      }
+
+      // Transform user and session data
+      const user = await this.transformAppwriteUser(userAccount);
+      const tokens = this.transformAppwriteSession(sessionInfo);
+
+      logger.info('OAuth2 callback processed successfully', { 
+        userId: user.$id, 
+        email: user.email 
+      });
+
+      return { user, session: tokens };
+    } catch (error) {
+      logger.error('OAuth2 callback failed', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        userId 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('session_not_found') || 
+            error.message.includes('Unauthorized')) {
+          throw new Error('OAuth2 session expired or invalid');
+        }
+        if (error.message.includes('OAuth2 callback requires userId and secret') ||
+            error.message.includes('OAuth2 callback userId mismatch')) {
+          throw error;
+        }
+      }
+      
+      throw new Error('OAuth2 callback processing failed');
+    }
+  }
+
+  async listOAuth2Sessions(sessionId: string): Promise<OAuth2Session[]> {
+    try {
+      const sessionClient = new Client()
+        .setEndpoint(config.appwrite.endpoint)
+        .setProject(config.appwrite.projectId)
+        .setSession(sessionId);
+      
+      const sessionAccount = new Account(sessionClient);
+      
+      // Get all sessions for the user
+      const sessions = await sessionAccount.listSessions();
+      
+      // Filter and transform OAuth2 sessions
+      const oauth2Sessions: OAuth2Session[] = sessions.sessions
+        .filter((session: any) => session.provider && session.provider !== 'email')
+        .map((session: any) => ({
+          provider: session.provider || 'unknown',
+          providerUid: session.providerUid || '',
+          providerAccessToken: session.providerAccessToken || '',
+          providerRefreshToken: session.providerRefreshToken,
+          providerAccessTokenExpiry: session.providerAccessTokenExpiry || '',
+          createdAt: session.$createdAt,
+        }));
+
+      logger.info('OAuth2 sessions listed', { 
+        sessionCount: oauth2Sessions.length 
+      });
+
+      return oauth2Sessions;
+    } catch (error) {
+      logger.error('Failed to list OAuth2 sessions', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        sessionId 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('session_not_found') || 
+            error.message.includes('Unauthorized')) {
+          throw new Error('Session expired or invalid');
+        }
+      }
+      
+      throw new Error('Failed to list OAuth2 sessions');
+    }
+  }
+
+  async deleteOAuth2Session(sessionId: string, provider: string): Promise<void> {
+    try {
+      if (!provider) {
+        throw new Error('Provider is required to delete OAuth2 session');
+      }
+
+      const sessionClient = new Client()
+        .setEndpoint(config.appwrite.endpoint)
+        .setProject(config.appwrite.projectId)
+        .setSession(sessionId);
+      
+      const sessionAccount = new Account(sessionClient);
+      
+      // Get all sessions to find the OAuth2 session with the specified provider
+      const sessions = await sessionAccount.listSessions();
+      
+      const oauth2Session = sessions.sessions.find((session: any) => 
+        session.provider === provider
+      );
+      
+      if (!oauth2Session) {
+        throw new Error(`No OAuth2 session found for provider: ${provider}`);
+      }
+      
+      // Delete the specific session
+      await sessionAccount.deleteSession(oauth2Session.$id);
+
+      logger.info('OAuth2 session deleted', { 
+        provider,
+        sessionId: oauth2Session.$id 
+      });
+    } catch (error) {
+      logger.error('Failed to delete OAuth2 session', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        provider,
+        sessionId 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('session_not_found') || 
+            error.message.includes('Unauthorized')) {
+          throw new Error('Session expired or invalid');
+        }
+        if (error.message.includes('Provider is required') ||
+            error.message.includes('No OAuth2 session found')) {
+          throw error;
+        }
+      }
+      
+      throw new Error('Failed to delete OAuth2 session');
     }
   }
 

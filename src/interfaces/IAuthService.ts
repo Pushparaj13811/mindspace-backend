@@ -1,4 +1,4 @@
-import type { User, AuthTokens, LoginRequest, RegisterRequest } from '../types/index.js';
+import type { User, AuthTokens, LoginRequest, RegisterRequest, OAuth2Session, OAuth2Request, OAuth2CallbackRequest } from '../types/index.js';
 
 export interface IAuthService {
   // Authentication methods
@@ -27,4 +27,10 @@ export interface IAuthService {
   
   // Account management
   deleteAccount(sessionId: string, password: string): Promise<void>;
+  
+  // OAuth2 methods
+  createOAuth2Session(provider: string, successUrl?: string, failureUrl?: string): Promise<string>;
+  handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens }>;
+  listOAuth2Sessions(sessionId: string): Promise<OAuth2Session[]>;
+  deleteOAuth2Session(sessionId: string, provider: string): Promise<void>;
 }
