@@ -140,6 +140,40 @@ export const authRoutes = new Elysia()
     },
   })
 
+  // Resend email verification
+  .post('/resend-verification', withServices(async (services, context) => {
+    const controller = new AuthController(services);
+    return await controller.resendVerification(context);
+  }), {
+    beforeHandle: authMiddleware,
+    detail: {
+      tags: ['Auth'],
+      summary: 'Resend email verification',
+      description: 'Sends a new email verification link to the authenticated user',
+      security: [{ bearerAuth: [] }],
+    },
+  })
+
+  // Confirm email verification
+  .get('/verify-email', withServices(async (services, context) => {
+    const controller = new AuthController(services);
+    return await controller.confirmVerification(context);
+  }), {
+    query: t.Object({
+      userId: t.String({
+        description: 'User ID from the verification email'
+      }),
+      secret: t.String({
+        description: 'Secret token from the verification email'
+      }),
+    }),
+    detail: {
+      tags: ['Auth'],
+      summary: 'Verify email address',
+      description: 'Confirms email verification using the link sent to user\'s email',
+    },
+  })
+
   // OAuth2 initiation endpoint
   .post('/oauth2/initiate', withServices(async (services, context) => {
     const controller = new AuthController(services);

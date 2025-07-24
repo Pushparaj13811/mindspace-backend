@@ -41,6 +41,24 @@ export class AppwriteAuthService implements IAuthService {
         userData.password
       );
 
+      // Set session for the new client to trigger verification
+      sessionClient.setSession(session.secret);
+      
+      // Trigger email verification
+      try {
+        await sessionAccount.createVerification(`${config.app.frontendUrl}/verify-email`);
+        logger.info('Verification email triggered', { 
+          userId: userAccount.$id, 
+          email: userData.email 
+        });
+      } catch (verificationError) {
+        // Log but don't fail registration if verification email fails
+        logger.error('Failed to trigger verification email', {
+          error: verificationError instanceof Error ? verificationError.message : 'Unknown error',
+          userId: userAccount.$id
+        });
+      }
+
       // Get user with preferences
       const user = await this.transformAppwriteUser(userAccount);
       const tokens = this.transformAppwriteSession(session);
@@ -401,6 +419,67 @@ export class AppwriteAuthService implements IAuthService {
       }
       
       throw new Error('Failed to delete account');
+    }
+  }
+
+  // Email verification methods
+  async createEmailVerification(sessionId: string): Promise<void> {
+    try {
+      const sessionClient = new Client()
+        .setEndpoint(config.appwrite.endpoint)
+        .setProject(config.appwrite.projectId)
+        .setSession(sessionId);
+      
+      const sessionAccount = new Account(sessionClient);
+      
+      // Create email verification
+      const verificationUrl = `${config.app.frontendUrl}/verify-email`;
+      await sessionAccount.createVerification(verificationUrl);
+
+      logger.info('Email verification created', { sessionId });
+    } catch (error) {
+      logger.error('Failed to create email verification', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        sessionId 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('user_already_verified')) {
+          throw new Error('Email is already verified');
+        }
+      }
+      
+      throw new Error('Failed to create email verification');
+    }
+  }
+
+  async confirmEmailVerification(userId: string, secret: string): Promise<void> {
+    try {
+      // For email verification, we don't need a session
+      const client = new Client()
+        .setEndpoint(config.appwrite.endpoint)
+        .setProject(config.appwrite.projectId);
+      
+      const account = new Account(client);
+      
+      // Confirm the email verification
+      await account.updateVerification(userId, secret);
+
+      logger.info('Email verification confirmed', { userId });
+    } catch (error) {
+      logger.error('Failed to confirm email verification', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        userId 
+      });
+      
+      if (error instanceof Error) {
+        if (error.message.includes('verification_invalid') || 
+            error.message.includes('Invalid verification')) {
+          throw new Error('Invalid or expired verification link');
+        }
+      }
+      
+      throw new Error('Failed to verify email');
     }
   }
 

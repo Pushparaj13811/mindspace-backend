@@ -28,6 +28,10 @@ export interface IAuthService {
   // Account management
   deleteAccount(sessionId: string, password: string): Promise<void>;
   
+  // Email verification
+  createEmailVerification(sessionId: string): Promise<void>;
+  confirmEmailVerification(userId: string, secret: string): Promise<void>;
+  
   // OAuth2 methods
   createOAuth2Session(provider: string, successUrl?: string, failureUrl?: string): Promise<string>;
   handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens }>;

@@ -9,6 +9,7 @@ import {
 } from '../utils/validation.js';
 import { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../utils/response.js';
 import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
+import { z } from 'zod';
 
 /**
  * Authentication Controller
@@ -31,16 +32,8 @@ export class AuthController extends BaseController {
       // Register user through service
       const { user, session } = await this.services.authService.register(validatedData);
       
-      // Send welcome email (non-blocking)
-      if (this.services.emailService) {
-        try {
-          await this.services.emailService.sendWelcomeEmail(user.email, user.name);
-          this.logAction('welcome_email_sent', user.$id, { email: user.email });
-        } catch (emailError) {
-          // Log email error but don't fail registration
-          this.logError(emailError as Error, 'send_welcome_email', user.$id);
-        }
-      }
+      // Note: Appwrite automatically sends verification email when createVerification is called
+      // We don't need to send a separate welcome email for now
       
       this.logAction('register_success', user.$id, { email: user.email });
       
@@ -456,5 +449,85 @@ export class AuthController extends BaseController {
     }
   }
 
+  /**
+   * Resend email verification
+   */
+  async resendVerification(context: { session?: string; set: any }) {
+    const { session, set } = context;
+    
+    try {
+      this.logAction('resend_verification_attempt');
+      
+      // Check authentication
+      if (!session) {
+        return this.handleAuthError(new Error('Authentication required'), set);
+      }
+      
+      // Create new email verification
+      await this.services.authService.createEmailVerification(session);
+      
+      this.logAction('resend_verification_success');
+      
+      return this.success(
+        { message: 'Verification email sent successfully' },
+        'Verification email has been sent to your registered email address'
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('already verified')) {
+          set.status = HTTP_STATUS.BAD_REQUEST;
+          return this.error('Email is already verified', HTTP_STATUS.BAD_REQUEST);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
 
+  /**
+   * Confirm email verification
+   */
+  async confirmVerification(context: { query: unknown; set: any }) {
+    const { query, set } = context;
+    
+    try {
+      this.logAction('confirm_verification_attempt');
+      
+      // Validate query parameters
+      const validatedQuery = this.validateQueryParams(
+        z.object({
+          userId: z.string(),
+          secret: z.string()
+        }),
+        query
+      );
+      
+      // Confirm email verification
+      await this.services.authService.confirmEmailVerification(
+        validatedQuery.userId,
+        validatedQuery.secret
+      );
+      
+      this.logAction('confirm_verification_success', validatedQuery.userId);
+      
+      return this.success(
+        { verified: true },
+        'Email verified successfully'
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Validation error')) {
+          return this.handleValidationError(error, set);
+        }
+        if (error.message.includes('Invalid or expired')) {
+          set.status = HTTP_STATUS.BAD_REQUEST;
+          return this.error('Invalid or expired verification link', HTTP_STATUS.BAD_REQUEST);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
 }
