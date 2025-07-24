@@ -7,6 +7,7 @@ import {
 } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
 import { validateBody, validateQuery, validateParams } from '../utils/validation.js';
+import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
 import type { z } from 'zod';
 
 /**
@@ -60,6 +61,18 @@ export abstract class BaseController {
    */
   protected handleBusinessError(error: Error, set: any) {
     logger.error('Business logic error', { error: error.message });
+    
+    // Check if this is an OAuth2-related error first
+    if (OAuth2ErrorHandler.isOAuth2Error(error)) {
+      OAuth2ErrorHandler.logOAuth2Error(error, {
+        action: 'business_error_fallback',
+        provider: 'unknown'
+      });
+      
+      const { status, message } = OAuth2ErrorHandler.handleOAuth2Error(error);
+      set.status = status;
+      return createErrorResponse(status, message);
+    }
     
     if (error.message.includes('not found')) {
       set.status = HTTP_STATUS.NOT_FOUND;
@@ -147,6 +160,20 @@ export abstract class BaseController {
       action,
       userId,
       controller: this.constructor.name,
+      ...metadata
+    });
+  }
+
+  /**
+   * Log controller errors
+   */
+  protected logError(error: Error, action: string, userId?: string, metadata?: Record<string, any>) {
+    logger.error(`Controller error: ${action}`, {
+      action,
+      userId,
+      controller: this.constructor.name,
+      error: error.message,
+      stack: error.stack,
       ...metadata
     });
   }

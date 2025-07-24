@@ -3,10 +3,12 @@ import {
   loginSchema, 
   registerSchema, 
   updateProfileSchema, 
-  updatePreferencesSchema 
+  updatePreferencesSchema,
+  oauth2RequestSchema,
+  oauth2CallbackSchema
 } from '../utils/validation.js';
 import { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../utils/response.js';
-import type { LoginRequest, RegisterRequest } from '../types/index.js';
+import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
 
 /**
  * Authentication Controller
@@ -28,6 +30,17 @@ export class AuthController extends BaseController {
       
       // Register user through service
       const { user, session } = await this.services.authService.register(validatedData);
+      
+      // Send welcome email (non-blocking)
+      if (this.services.emailService) {
+        try {
+          await this.services.emailService.sendWelcomeEmail(user.email, user.name);
+          this.logAction('welcome_email_sent', user.$id, { email: user.email });
+        } catch (emailError) {
+          // Log email error but don't fail registration
+          this.logError(emailError as Error, 'send_welcome_email', user.$id);
+        }
+      }
       
       this.logAction('register_success', user.$id, { email: user.email });
       
@@ -329,4 +342,119 @@ export class AuthController extends BaseController {
       );
     }
   }
+
+  /**
+   * Initiate OAuth2 authentication flow
+   */
+  async initiateOAuth2(context: { body: unknown; set: any }) {
+    const { body, set } = context;
+    
+    try {
+      this.logAction('oauth2_initiate');
+      
+      // Validate request body
+      const validatedData = this.validateRequestBody(oauth2RequestSchema, body);
+      
+      // Create OAuth2 session through service
+      const redirectUrl = await this.services.authService.createOAuth2Session(
+        validatedData.provider,
+        validatedData.successUrl,
+        validatedData.failureUrl
+      );
+      
+      this.logAction('oauth2_redirect_created', undefined, { provider: validatedData.provider });
+      
+      return this.success(
+        { redirectUrl },
+        SUCCESS_MESSAGES.OAUTH2_SESSION_CREATED
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Validation error')) {
+          return this.handleValidationError(error, set);
+        }
+        
+        // Handle OAuth2-specific errors using the dedicated handler
+        if (OAuth2ErrorHandler.isOAuth2Error(error)) {
+          OAuth2ErrorHandler.logOAuth2Error(error, {
+            action: 'oauth2_initiate',
+            provider: 'google'
+          });
+          
+          const { status, message } = OAuth2ErrorHandler.handleOAuth2Error(error);
+          set.status = status;
+          return this.error(message, status);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
+
+  /**
+   * Handle OAuth2 callback and create user session
+   */
+  async handleOAuth2Callback(context: { query: unknown; set: any }) {
+    const { query, set } = context;
+    
+    try {
+      this.logAction('oauth2_callback');
+      
+      // Validate query parameters
+      const validatedQuery = this.validateQueryParams(oauth2CallbackSchema, query);
+      
+      // Process OAuth2 callback through service
+      const { user, session } = await this.services.authService.handleOAuth2Callback(
+        validatedQuery.userId,
+        validatedQuery.secret
+      );
+      
+      // Send welcome email for OAuth2 users (non-blocking)
+      // Note: For OAuth2, we can't easily detect if user is new, so we send welcome email
+      // The EmailService should handle duplicate emails gracefully
+      if (this.services.emailService) {
+        try {
+          await this.services.emailService.sendWelcomeEmail(user.email, user.name);
+          this.logAction('oauth2_welcome_email_sent', user.$id, { email: user.email });
+        } catch (emailError) {
+          // Log email error but don't fail OAuth2 authentication
+          this.logError(emailError as Error, 'send_oauth2_welcome_email', user.$id);
+        }
+      }
+      
+      this.logAction('oauth2_success', user.$id, { 
+        email: user.email, 
+        provider: 'google' 
+      });
+      
+      return this.success(
+        { user, session },
+        SUCCESS_MESSAGES.OAUTH2_AUTHENTICATION_SUCCESS
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Validation error')) {
+          return this.handleValidationError(error, set);
+        }
+        
+        // Handle OAuth2-specific errors using the dedicated handler
+        if (OAuth2ErrorHandler.isOAuth2Error(error)) {
+          OAuth2ErrorHandler.logOAuth2Error(error, {
+            action: 'oauth2_callback',
+            provider: 'google'
+          });
+          
+          const { status, message } = OAuth2ErrorHandler.handleOAuth2Error(error);
+          set.status = status;
+          return this.error(message, status);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
+
+
 }
