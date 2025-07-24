@@ -102,6 +102,19 @@ export const ERROR_MESSAGES = {
   AI_SERVICE_ERROR: 'AI service is currently unavailable',
   AI_QUOTA_EXCEEDED: 'AI usage quota exceeded',
   INVALID_AI_REQUEST: 'Invalid AI request parameters',
+  
+  // OAuth2
+  OAUTH2_PROVIDER_NOT_CONFIGURED: 'OAuth2 provider not properly configured',
+  OAUTH2_SESSION_EXPIRED: 'OAuth2 session has expired',
+  OAUTH2_CALLBACK_INVALID: 'Invalid OAuth2 callback parameters',
+  OAUTH2_AUTHENTICATION_FAILED: 'OAuth2 authentication failed',
+  OAUTH2_ACCESS_DENIED: 'OAuth2 authorization was denied by the user',
+  OAUTH2_STATE_MISMATCH: 'OAuth2 state parameter mismatch. Please try again.',
+  OAUTH2_REDIRECT_MISMATCH: 'OAuth2 redirect URI mismatch',
+  OAUTH2_RATE_LIMIT: 'OAuth2 rate limit exceeded. Please try again later.',
+  OAUTH2_SERVICE_UNAVAILABLE: 'OAuth2 service is temporarily unavailable. Please try again later.',
+  OAUTH2_INVALID_CLIENT: 'OAuth2 client configuration is invalid',
+  OAUTH2_INSUFFICIENT_SCOPE: 'OAuth2 insufficient permissions granted',
 } as const;
 
 // Success messages
@@ -129,6 +142,10 @@ export const SUCCESS_MESSAGES = {
   
   // AI
   AI_ANALYSIS_COMPLETE: 'AI analysis completed successfully',
+  
+  // OAuth2
+  OAUTH2_SESSION_CREATED: 'OAuth2 session created successfully',
+  OAUTH2_AUTHENTICATION_SUCCESS: 'OAuth2 authentication successful',
 } as const;
 
 // Helper function to create error response with status
