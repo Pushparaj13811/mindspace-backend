@@ -35,13 +35,65 @@ async function startServer() {
             info: {
               title: 'MindSpace API',
               version: '1.0.0',
-              description: 'AI-powered mental wellness platform API',
+              description: `
+                AI-powered mental wellness platform API
+                
+                ## Authentication
+                
+                This API supports two authentication methods:
+                
+                ### 1. Email/Password Authentication
+                Use the \`/api/v1/auth/login\` endpoint to authenticate with email and password.
+                
+                ### 2. OAuth2 Authentication (Google)
+                Use the OAuth2 flow for Google authentication:
+                1. Call \`/api/v1/auth/oauth2/initiate\` to get a redirect URL
+                2. Redirect user to the returned URL for Google authentication
+                3. Google will redirect back to \`/api/v1/auth/oauth2/callback\`
+                4. The callback will return user data and session tokens
+                
+                ## Authorization
+                
+                After successful authentication, include the access token in the Authorization header:
+                \`\`\`
+                Authorization: Bearer <your-access-token>
+                \`\`\`
+                
+                ## Rate Limiting
+                
+                Authentication endpoints are rate-limited to prevent abuse. If you exceed the rate limit, 
+                you'll receive a 429 status code.
+                
+                ## Error Handling
+                
+                All endpoints return consistent error responses:
+                \`\`\`json
+                {
+                  "success": false,
+                  "error": "Error message",
+                  "message": "Optional additional context",
+                  "timestamp": "2024-01-15T10:30:00.000Z"
+                }
+                \`\`\`
+              `,
             },
             tags: [
-              { name: 'Auth', description: 'Authentication endpoints' },
-              { name: 'Journal', description: 'Journal management endpoints' },
-              { name: 'Mood', description: 'Mood tracking endpoints' },
-              { name: 'AI', description: 'AI integration endpoints' },
+              { 
+                name: 'Auth', 
+                description: 'Authentication and user management endpoints including OAuth2 support' 
+              },
+              { 
+                name: 'Journal', 
+                description: 'Journal management endpoints for creating and managing journal entries' 
+              },
+              { 
+                name: 'Mood', 
+                description: 'Mood tracking endpoints for logging and analyzing mood data' 
+              },
+              { 
+                name: 'AI', 
+                description: 'AI integration endpoints for intelligent insights and analysis' 
+              },
             ],
             servers: [
               {
@@ -49,6 +101,186 @@ async function startServer() {
                 description: 'Development server',
               },
             ],
+            components: {
+              securitySchemes: {
+                bearerAuth: {
+                  type: 'http',
+                  scheme: 'bearer',
+                  bearerFormat: 'JWT',
+                  description: 'JWT access token obtained from login or OAuth2 authentication'
+                }
+              },
+              schemas: {
+                User: {
+                  type: 'object',
+                  properties: {
+                    $id: {
+                      type: 'string',
+                      description: 'Unique user identifier'
+                    },
+                    email: {
+                      type: 'string',
+                      format: 'email',
+                      description: 'User email address'
+                    },
+                    name: {
+                      type: 'string',
+                      description: 'User display name'
+                    },
+                    avatar: {
+                      type: 'string',
+                      format: 'uri',
+                      description: 'User avatar URL',
+                      nullable: true
+                    },
+                    subscription: {
+                      type: 'object',
+                      properties: {
+                        tier: {
+                          type: 'string',
+                          enum: ['free', 'premium', 'enterprise'],
+                          description: 'User subscription tier'
+                        },
+                        validUntil: {
+                          type: 'string',
+                          format: 'date-time',
+                          description: 'Subscription expiration date',
+                          nullable: true
+                        }
+                      }
+                    },
+                    preferences: {
+                      type: 'object',
+                      properties: {
+                        theme: {
+                          type: 'string',
+                          enum: ['light', 'dark', 'auto'],
+                          description: 'User interface theme preference'
+                        },
+                        notifications: {
+                          type: 'boolean',
+                          description: 'Whether notifications are enabled'
+                        },
+                        preferredAIModel: {
+                          type: 'string',
+                          description: 'Preferred AI model for analysis'
+                        },
+                        language: {
+                          type: 'string',
+                          description: 'User interface language'
+                        }
+                      }
+                    },
+                    createdAt: {
+                      type: 'string',
+                      format: 'date-time',
+                      description: 'Account creation timestamp'
+                    },
+                    updatedAt: {
+                      type: 'string',
+                      format: 'date-time',
+                      description: 'Last account update timestamp'
+                    }
+                  }
+                },
+                AuthTokens: {
+                  type: 'object',
+                  properties: {
+                    accessToken: {
+                      type: 'string',
+                      description: 'JWT access token for API authentication'
+                    },
+                    refreshToken: {
+                      type: 'string',
+                      description: 'Refresh token for obtaining new access tokens'
+                    },
+                    expiresIn: {
+                      type: 'number',
+                      description: 'Access token expiration time in seconds'
+                    }
+                  }
+                },
+                OAuth2InitiateRequest: {
+                  type: 'object',
+                  required: ['provider'],
+                  properties: {
+                    provider: {
+                      type: 'string',
+                      enum: ['google'],
+                      description: 'OAuth2 provider - currently only Google is supported'
+                    },
+                    successUrl: {
+                      type: 'string',
+                      format: 'uri',
+                      description: 'URL to redirect to after successful authentication'
+                    },
+                    failureUrl: {
+                      type: 'string',
+                      format: 'uri',
+                      description: 'URL to redirect to after failed authentication'
+                    }
+                  }
+                },
+                OAuth2CallbackQuery: {
+                  type: 'object',
+                  required: ['userId', 'secret'],
+                  properties: {
+                    userId: {
+                      type: 'string',
+                      description: 'User ID returned by OAuth2 provider'
+                    },
+                    secret: {
+                      type: 'string',
+                      description: 'Secret token returned by OAuth2 provider'
+                    }
+                  }
+                },
+                SuccessResponse: {
+                  type: 'object',
+                  properties: {
+                    success: {
+                      type: 'boolean',
+                      enum: [true]
+                    },
+                    data: {
+                      type: 'object',
+                      description: 'Response data'
+                    },
+                    message: {
+                      type: 'string',
+                      description: 'Success message'
+                    },
+                    timestamp: {
+                      type: 'string',
+                      format: 'date-time',
+                      description: 'Response timestamp'
+                    }
+                  }
+                },
+                ErrorResponse: {
+                  type: 'object',
+                  properties: {
+                    success: {
+                      type: 'boolean',
+                      enum: [false]
+                    },
+                    error: {
+                      type: 'string',
+                      description: 'Error message'
+                    },
+                    message: {
+                      type: 'string',
+                      description: 'Additional error context'
+                    },
+                    timestamp: {
+                      type: 'string',
+                      format: 'date-time',
+                      description: 'Response timestamp'
+                    }
+                  }
+                }
+              }
+            }
           },
         })
       )
