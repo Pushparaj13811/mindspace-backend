@@ -47,6 +47,13 @@ export interface IAIService {
     recentMoods?: any[];
   }): Promise<string[]>;
   
+  // Additional methods implemented by GeminiAIService
+  chatWithAI(message: string, context?: any): Promise<any>;
+  analyzeJournalEntry(entry: any): Promise<any>;
+  generateMoodInsights(moodHistory: any[]): Promise<any>;
+  generateWellnessContent(type: string, userPreferences?: any): Promise<any>;
+  healthCheck(): Promise<boolean>;
+  
   // Provider management
   getAvailableProviders(): Promise<AIProvider[]>;
   switchProvider(providerName: string): Promise<void>;

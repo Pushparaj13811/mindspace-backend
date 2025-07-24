@@ -290,7 +290,7 @@ export class GeminiAIService implements IAIService {
         type
       });
 
-      const fallbackContent = {
+      const fallbackContent: Record<string, string> = {
         daily_affirmation: "Today is a new opportunity to grow, learn, and take care of your mental wellness.",
         mindfulness_tip: "Take three deep breaths and notice how your body feels right now. This simple moment of awareness can help ground you in the present.",
         gratitude_prompt: "What's one small thing that happened today that made you smile or feel appreciated?",
@@ -362,8 +362,8 @@ export class GeminiAIService implements IAIService {
       
       // Split into lines and clean up
       const prompts = text.split('\n')
-        .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim())
-        .filter(line => line.length > 10);
+        .map((line: string) => line.replace(/^\d+[\.\)]\s*/, '').trim())
+        .filter((line: string) => line.length > 10);
       
       return prompts.slice(0, 3);
     } catch (error) {
@@ -397,8 +397,8 @@ export class GeminiAIService implements IAIService {
       const text = response.text();
       
       const advice = text.split('\n')
-        .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim())
-        .filter(line => line.length > 10);
+        .map((line: string) => line.replace(/^\d+[\.\)]\s*/, '').trim())
+        .filter((line: string) => line.length > 10);
       
       return advice.slice(0, 3);
     } catch (error) {

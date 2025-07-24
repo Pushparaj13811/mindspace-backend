@@ -9,14 +9,14 @@ export class AIController extends BaseController {
 
   async chatWithAI(context: any) {
     const { user, session, body, set } = context;
-    
+
     try {
       const { user: authUser } = this.requireAuth(user, session, set);
-      
+
       this.logAction('ai_chat_request', authUser.$id);
-      
+
       const { message, includeContext = true } = body;
-      
+
       if (!message || typeof message !== 'string' || message.trim().length === 0) {
         throw new Error('Validation error: Message is required');
       }
@@ -30,7 +30,7 @@ export class AIController extends BaseController {
         // Get recent user context for personalized responses
         try {
           const recentMoods = await this.services.databaseService.getMoodHistory(
-            authUser.$id, 
+            authUser.$id,
             { limit: 5, sortOrder: 'desc' }
           );
 
@@ -68,28 +68,28 @@ export class AIController extends BaseController {
           return this.handleValidationError(error, set);
         }
       }
-      
+
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async analyzeJournal(context: any) {
     const { user, session, body, set } = context;
-    
+
     try {
       const { user: authUser } = this.requireAuth(user, session, set);
-      
+
       this.logAction('ai_journal_analysis_request', authUser.$id);
-      
+
       const { entryId } = body;
-      
+
       if (!entryId) {
         throw new Error('Validation error: Entry ID is required');
       }
 
       // Get the journal entry
       const journalEntry = await this.services.databaseService.getJournalEntry(
-        entryId, 
+        entryId,
         authUser.$id
       );
 
@@ -142,21 +142,21 @@ export class AIController extends BaseController {
           return this.handleValidationError(error, set);
         }
       }
-      
+
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getMoodInsights(context: any) {
     const { user, session, query, set } = context;
-    
+
     try {
       const { user: authUser } = this.requireAuth(user, session, set);
-      
+
       this.logAction('ai_mood_insights_request', authUser.$id);
-      
+
       const { period = '30d' } = query || {};
-      
+
       let limit = 30;
       switch (period) {
         case '7d': limit = 20; break;
@@ -195,21 +195,21 @@ export class AIController extends BaseController {
           return this.handleAuthError(error, set);
         }
       }
-      
+
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getWellnessContent(context: any) {
     const { user, session, query, set } = context;
-    
+
     try {
       const { user: authUser } = this.requireAuth(user, session, set);
-      
+
       this.logAction('ai_wellness_content_request', authUser.$id);
-      
+
       const { type = 'daily_affirmation' } = query || {};
-      
+
       const validTypes = ['daily_affirmation', 'mindfulness_tip', 'gratitude_prompt', 'breathing_exercise'];
       if (!validTypes.includes(type)) {
         throw new Error('Validation error: Invalid content type');
@@ -243,17 +243,17 @@ export class AIController extends BaseController {
           return this.handleValidationError(error, set);
         }
       }
-      
+
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getAICapabilities(context: any) {
     const { user, session, set } = context;
-    
+
     try {
       const { user: authUser } = this.requireAuth(user, session, set);
-      
+
       this.logAction('ai_capabilities_request', authUser.$id);
 
       return this.success({
@@ -291,17 +291,17 @@ export class AIController extends BaseController {
       if (error instanceof Error && error.message === 'Authentication required') {
         return this.handleAuthError(error, set);
       }
-      
+
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getAIHealth(context: any) {
     const { set } = context;
-    
+
     try {
       const isHealthy = await this.services.aiService.healthCheck();
-      
+
       if (isHealthy) {
         return this.success({
           status: 'healthy',
