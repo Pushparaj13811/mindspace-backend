@@ -20,6 +20,18 @@ export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
+// OAuth2 schemas
+export const oauth2RequestSchema = z.object({
+  provider: z.literal('google', { errorMap: () => ({ message: 'Only Google OAuth2 is supported' }) }),
+  successUrl: z.string().url('Invalid success URL').optional(),
+  failureUrl: z.string().url('Invalid failure URL').optional(),
+});
+
+export const oauth2CallbackSchema = z.object({
+  userId: z.string().min(1, 'User ID is required'),
+  secret: z.string().min(1, 'Secret is required'),
+});
+
 // Mood schemas
 export const moodStateSchema = z.object({
   current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed']),
@@ -141,6 +153,8 @@ export type JournalQueryInput = z.infer<typeof journalQuerySchema>;
 export type AIRequestInput = z.infer<typeof aiRequestSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;
+export type OAuth2RequestInput = z.infer<typeof oauth2RequestSchema>;
+export type OAuth2CallbackInput = z.infer<typeof oauth2CallbackSchema>;
 
 // Validation middleware helper
 export const validateBody = (schema: z.ZodSchema) => {

@@ -119,6 +119,26 @@ export interface RegisterRequest {
   name: string;
 }
 
+export interface OAuth2Session {
+  provider: string;
+  providerUid: string;
+  providerAccessToken: string;
+  providerRefreshToken?: string;
+  providerAccessTokenExpiry: string;
+  createdAt: string;
+}
+
+export interface OAuth2Request {
+  provider: 'google';
+  successUrl?: string;
+  failureUrl?: string;
+}
+
+export interface OAuth2CallbackRequest {
+  userId: string;
+  secret: string;
+}
+
 export interface CreateJournalRequest {
   title: string;
   content: string;
@@ -187,5 +207,16 @@ export interface Config {
   };
   cors: {
     allowedOrigins: string[];
+  };
+  email: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    password: string;
+    from: string;
+  };
+  app: {
+    frontendUrl: string;
   };
 }
