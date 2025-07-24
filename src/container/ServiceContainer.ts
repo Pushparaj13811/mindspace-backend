@@ -3,6 +3,7 @@ import type { IDatabaseService } from '../interfaces/IDatabaseService.js';
 import type { IAIService } from '../interfaces/IAIService.js';
 import type { IFileService } from '../interfaces/IFileService.js';
 import type { INotificationService } from '../interfaces/INotificationService.js';
+import type { IEmailService } from '../interfaces/IEmailService.js';
 
 export interface ServiceContainer {
   authService: IAuthService;
@@ -10,6 +11,7 @@ export interface ServiceContainer {
   aiService: IAIService;
   fileService: IFileService;
   notificationService: INotificationService;
+  emailService: IEmailService;
 }
 
 export interface ServiceRegistry {
@@ -68,6 +70,7 @@ export const SERVICE_KEYS = {
   AI_SERVICE: 'aiService',
   FILE_SERVICE: 'fileService',
   NOTIFICATION_SERVICE: 'notificationService',
+  EMAIL_SERVICE: 'emailService',
 } as const;
 
 // Helper function to get all services as a typed container
@@ -81,6 +84,9 @@ export function getServices(): ServiceContainer {
       : null as any,
     notificationService: container.isRegistered(SERVICE_KEYS.NOTIFICATION_SERVICE) 
       ? container.resolve<INotificationService>(SERVICE_KEYS.NOTIFICATION_SERVICE) 
+      : null as any,
+    emailService: container.isRegistered(SERVICE_KEYS.EMAIL_SERVICE) 
+      ? container.resolve<IEmailService>(SERVICE_KEYS.EMAIL_SERVICE) 
       : null as any,
   };
 }
