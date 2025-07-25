@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js';
 import { validateBody, validateQuery, validateParams } from '../utils/validation.js';
 import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
 import { PermissionError } from '../core/middleware/PermissionGuard.js';
+import { BusinessError, isBusinessError } from '../utils/BusinessError.js';
 import type { z } from 'zod';
 
 /**
@@ -91,6 +92,16 @@ export abstract class BaseController {
       return this.handlePermissionError(error, set);
     }
     
+    // Handle business errors with proper status codes
+    if (isBusinessError(error)) {
+      set.status = error.statusCode;
+      return createErrorResponse(
+        error.statusCode,
+        error.message,
+        error.code
+      );
+    }
+    
     // Check if this is an OAuth2-related error
     if (OAuth2ErrorHandler.isOAuth2Error(error)) {
       OAuth2ErrorHandler.logOAuth2Error(error, {
@@ -111,7 +122,9 @@ export abstract class BaseController {
       );
     }
 
-    if (error.message.includes('already exists')) {
+    if (error.message.includes('already exists') ||
+        error.message.includes('duplicate') ||
+        error.message.includes('conflict')) {
       set.status = HTTP_STATUS.CONFLICT;
       return createErrorResponse(
         HTTP_STATUS.CONFLICT,
@@ -119,7 +132,9 @@ export abstract class BaseController {
       );
     }
     
-    if (error.message.includes('Invalid email or password')) {
+    if (error.message.includes('Invalid email or password') || 
+        error.message.includes('Invalid credentials') ||
+        error.message.includes('invalid credentials')) {
       set.status = HTTP_STATUS.UNAUTHORIZED;
       return createErrorResponse(
         HTTP_STATUS.UNAUTHORIZED,
@@ -127,11 +142,43 @@ export abstract class BaseController {
       );
     }
 
-    if (error.message.includes('access denied') || error.message.includes('forbidden')) {
+    if (error.message.includes('access denied') || 
+        error.message.includes('forbidden') ||
+        error.message.includes('insufficient permission')) {
       set.status = HTTP_STATUS.FORBIDDEN;
       return createErrorResponse(
         HTTP_STATUS.FORBIDDEN,
-        ERROR_MESSAGES.ACCESS_DENIED
+        error.message
+      );
+    }
+
+    if (error.message.includes('unauthorized') ||
+        error.message.includes('token') && error.message.includes('invalid') ||
+        error.message.includes('session') && error.message.includes('expired')) {
+      set.status = HTTP_STATUS.UNAUTHORIZED;
+      return createErrorResponse(
+        HTTP_STATUS.UNAUTHORIZED,
+        error.message
+      );
+    }
+
+    if (error.message.includes('validation') ||
+        error.message.includes('invalid format') ||
+        error.message.includes('required field') ||
+        error.message.includes('bad request')) {
+      set.status = HTTP_STATUS.BAD_REQUEST;
+      return createErrorResponse(
+        HTTP_STATUS.BAD_REQUEST,
+        error.message
+      );
+    }
+
+    if (error.message.includes('too many requests') ||
+        error.message.includes('rate limit')) {
+      set.status = HTTP_STATUS.TOO_MANY_REQUESTS;
+      return createErrorResponse(
+        HTTP_STATUS.TOO_MANY_REQUESTS,
+        error.message
       );
     }
 
