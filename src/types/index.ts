@@ -56,6 +56,7 @@ export interface User {
     notifications: boolean;
     preferredAIModel: string;
     language: string;
+    interests?: string[];
   };
   
   // Metadata
@@ -71,6 +72,14 @@ export interface MoodState {
   timestamp: string;
   triggers?: string[];
   notes?: string;
+}
+
+export interface MoodEntry {
+  $id: string;
+  userId: string;
+  mood: MoodState;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface JournalEntry {
@@ -326,3 +335,19 @@ export interface PlatformAnalytics {
     averageRevenuePerUser: number;
   };
 }
+
+// Export validation types
+export type { 
+  LoginInput, 
+  RegisterInput,
+  CreateJournalInput,
+  UpdateJournalInput,
+  JournalQueryInput,
+  AIRequestInput,
+  UpdateProfileInput,
+  UpdatePreferencesInput,
+  OAuth2RequestInput,
+  OAuth2CallbackInput,
+  MoodLogInput,
+  MoodQueryInput
+} from '../utils/validation.js';

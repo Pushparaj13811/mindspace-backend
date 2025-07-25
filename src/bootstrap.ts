@@ -1,9 +1,11 @@
-import { container, SERVICE_KEYS } from './container/ServiceContainer.js';
-import { AppwriteAuthService } from './services/AppwriteAuthService.js';
-import { AppwriteDatabaseService } from './services/AppwriteDatabaseService.js';
-import { AppwriteCompanyService } from './services/AppwriteCompanyService.js';
-import { GeminiAIService } from './services/GeminiAIService.js';
-import { EmailService } from './services/EmailService.js';
+import { 
+  container, 
+  SERVICE_KEYS, 
+  serviceProviderManager, 
+  serviceHealthChecker 
+} from './core/container/ServiceContainer.js';
+import { AppwriteServiceProvider } from './core/providers/AppwriteServiceProvider.js';
+import { BusinessServiceProvider } from './core/providers/BusinessServiceProvider.js';
 import { config, validateConfig } from './utils/config.js';
 import { logger } from './utils/logger.js';
 
@@ -39,118 +41,62 @@ export async function bootstrap(): Promise<void> {
 
 /**
  * Register all service implementations in the DI container
- * This is where we wire up the concrete implementations to interfaces
+ * This uses the service provider pattern for better organization
  */
 async function registerServices(): Promise<void> {
-  // Register Auth Service (Appwrite implementation)
-  container.register(SERVICE_KEYS.AUTH_SERVICE, () => {
-    logger.info('Creating AppwriteAuthService instance');
-    return new AppwriteAuthService();
-  });
+  // Add service providers
+  serviceProviderManager.addProvider(new AppwriteServiceProvider());
+  serviceProviderManager.addProvider(new BusinessServiceProvider());
 
-  // Register Database Service (Appwrite implementation)
-  container.register(SERVICE_KEYS.DATABASE_SERVICE, () => {
-    logger.info('Creating AppwriteDatabaseService instance');
-    return new AppwriteDatabaseService();
-  });
-
-  // Register AI Service (Gemini implementation)
-  container.register(SERVICE_KEYS.AI_SERVICE, () => {
-    logger.info('Creating GeminiAIService instance');
-    return new GeminiAIService();
-  });
-
-  // Register Email Service (Nodemailer implementation)
-  container.register(SERVICE_KEYS.EMAIL_SERVICE, () => {
-    logger.info('Creating EmailService instance');
-    return new EmailService();
-  });
-
-  // Register Company Service (Appwrite implementation)
-  container.register(SERVICE_KEYS.COMPANY_SERVICE, () => {
-    logger.info('Creating AppwriteCompanyService instance');
-    return new AppwriteCompanyService();
-  });
-
-  // TODO: Register other services as we implement them
-  // container.register(SERVICE_KEYS.FILE_SERVICE, () => new AppwriteFileService());
-  // container.register(SERVICE_KEYS.NOTIFICATION_SERVICE, () => new ExpoNotificationService());
+  // Register all services through providers
+  serviceProviderManager.registerAll(container);
 
   logger.info('Service registration completed', {
-    registeredServices: [
-      SERVICE_KEYS.AUTH_SERVICE,
-      SERVICE_KEYS.DATABASE_SERVICE,
-      SERVICE_KEYS.AI_SERVICE,
-      SERVICE_KEYS.EMAIL_SERVICE,
-      SERVICE_KEYS.COMPANY_SERVICE,
-    ]
+    registeredServices: container.getRegisteredKeys()
   });
 }
 
 /**
  * Test connections to all external services
- * This helps identify configuration issues early
+ * This uses the service health checker for better organization
  */
 async function testServiceConnections(): Promise<void> {
-  const connectionTests: Array<{ name: string; test: () => Promise<boolean> }> = [];
-
-  // Test database connection
   try {
-    const databaseService = container.resolve<any>(SERVICE_KEYS.DATABASE_SERVICE);
-    connectionTests.push({
-      name: 'Database Service',
-      test: () => databaseService.healthCheck()
-    });
-  } catch (error) {
-    logger.warn('Database service not available for health check');
-  }
-
-  // Test email service connection
-  try {
-    const emailService = container.resolve<any>(SERVICE_KEYS.EMAIL_SERVICE);
-    connectionTests.push({
-      name: 'Email Service',
-      test: () => emailService.testConnection()
-    });
-  } catch (error) {
-    logger.warn('Email service not available for health check');
-  }
-
-  // Test company service connection
-  try {
-    const companyService = container.resolve<any>(SERVICE_KEYS.COMPANY_SERVICE);
-    connectionTests.push({
-      name: 'Company Service',
-      test: () => companyService.healthCheck()
-    });
-  } catch (error) {
-    logger.warn('Company service not available for health check');
-  }
-
-  // Run all connection tests
-  const results = await Promise.allSettled(
-    connectionTests.map(async ({ name, test }) => {
-      const isHealthy = await test();
-      return { name, isHealthy };
-    })
-  );
-
-  // Log results
-  results.forEach((result, index) => {
-    const testName = connectionTests[index]?.name || 'Unknown Service';
+    const healthSummary = await serviceHealthChecker.getHealthSummary();
     
-    if (result.status === 'fulfilled') {
-      if (result.value.isHealthy) {
-        logger.info(`✅ ${testName} connection successful`);
+    logger.info('Service health check completed', {
+      totalServices: healthSummary.totalServices,
+      healthyServices: healthSummary.healthyServices,
+      unhealthyServices: healthSummary.unhealthyServices
+    });
+
+    // Log individual service status
+    Object.entries(healthSummary.details).forEach(([serviceName, status]) => {
+      if (status.healthy) {
+        logger.info(`✅ ${serviceName} service healthy`);
       } else {
-        logger.warn(`⚠️  ${testName} connection failed - service may not function properly`);
+        logger.warn(`⚠️  ${serviceName} service unhealthy: ${status.error}`);
       }
-    } else {
-      logger.error(`❌ ${testName} connection test failed`, { 
-        error: result.reason 
-      });
+    });
+
+    // Warn if critical services are unhealthy
+    const criticalServices = [
+      SERVICE_KEYS.AUTH_SERVICE,
+      SERVICE_KEYS.DATABASE_SERVICE,
+      SERVICE_KEYS.PERMISSION_SERVICE
+    ];
+
+    const unhealthyCriticalServices = criticalServices.filter(
+      service => !healthSummary.details[service]?.healthy
+    );
+
+    if (unhealthyCriticalServices.length > 0) {
+      logger.warn('Critical services are unhealthy:', unhealthyCriticalServices);
     }
-  });
+
+  } catch (error) {
+    logger.error('Service health check failed:', error);
+  }
 }
 
 /**
