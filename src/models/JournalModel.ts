@@ -81,14 +81,14 @@ export const JournalSchema = {
     { key: 'attachmentImages', type: 'string', size: 500, array: true, required: false },
     { key: 'attachmentVoiceRecording', type: 'string', size: 500, required: false },
     
-    // AI insights (simplified for now due to attribute limits)
+    // AI insights (disabled for now due to attribute limits - can be added later if needed)
     // { key: 'aiInsightsSentiment', type: 'float', required: false },
     // { key: 'aiInsightsEmotions', type: 'string', size: 50, array: true, required: false },
     // { key: 'aiInsightsThemes', type: 'string', size: 100, array: true, required: false },
     // { key: 'aiInsightsSuggestions', type: 'string', size: 500, array: true, required: false },
     
     // Metadata
-    { key: 'encrypted', type: 'boolean', required: true, default: false }
+    { key: 'encrypted', type: 'boolean', required: true }
   ],
   indexes: [
     { key: 'user_index', type: 'key', attributes: ['userId'] },
