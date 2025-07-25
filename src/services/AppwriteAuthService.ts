@@ -224,7 +224,18 @@ export class AppwriteAuthService implements IAuthService {
           if (parts.length === 3 && parts[1]) {
             const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
             const userId = payload.userId || payload.sub;
-            const exp = payload.exp ? payload.exp * 1000 : Date.now() + (15 * 60 * 1000); // Default 15 min if no exp
+            
+            // Blacklist until well into the future to ensure token can't be used
+            // Don't rely on JWT expiration time as it might be in the past or too soon
+            const blacklistUntil = Date.now() + (24 * 60 * 60 * 1000); // 24 hours from now
+            
+            logger.info('JWT logout details', {
+              userId,
+              originalExp: payload.exp,
+              originalExpDate: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'none',
+              blacklistUntil: new Date(blacklistUntil).toISOString(),
+              currentTime: new Date().toISOString()
+            });
             
             // Use token hash as unique identifier
             const crypto = await import('crypto');
@@ -232,12 +243,13 @@ export class AppwriteAuthService implements IAuthService {
             
             if (userId) {
               const { jwtBlacklist } = await import('../utils/jwtBlacklist.js');
-              jwtBlacklist.blacklistToken(tokenHash, userId, exp);
+              jwtBlacklist.blacklistToken(tokenHash, userId, blacklistUntil);
               
               logger.info('JWT token blacklisted on logout', { 
                 userId,
                 tokenHash,
-                expiresAt: new Date(exp).toISOString()
+                blacklistUntil: new Date(blacklistUntil).toISOString(),
+                blacklistStatsAfter: jwtBlacklist.getStats()
               });
             }
           }
@@ -808,18 +820,17 @@ export class AppwriteAuthService implements IAuthService {
       let userName: string;
 
       if (token.includes('.')) {
-        // JWT token - extract user ID from payload
+        // JWT token - validate and extract user ID (includes blacklist check)
         try {
-          const parts = token.split('.');
-          if (parts.length !== 3 || !parts[1]) {
-            throw new Error('Invalid JWT format');
-          }
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          userId = payload.userId || payload.sub;
+          const { userId: jwtUserId } = await this.validateJWTToken(token);
+          userId = jwtUserId;
           
-          logger.info('Extracted user ID from JWT for email verification', { userId });
+          logger.info('Extracted user ID from validated JWT for email verification', { userId });
         } catch (decodeError) {
-          logger.error('Failed to decode JWT in createEmailVerification', { error: decodeError });
+          logger.error('Failed to validate JWT in createEmailVerification', { error: decodeError });
+          if (decodeError instanceof Error && decodeError.message.includes('Token has been revoked')) {
+            throw new Error('Token has been revoked');
+          }
           throw new Error('Invalid token');
         }
       } else {
@@ -877,29 +888,62 @@ export class AppwriteAuthService implements IAuthService {
     }
   }
 
-  async confirmEmailVerification(userId: string, secret: string): Promise<void> {
+  async confirmEmailVerification(verificationToken: string): Promise<{ userId: string; email: string }> {
     try {
-      // For email verification, we don't need a session
-      const client = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId);
+      // Verify the custom token from our verification store
+      const { verificationStore } = await import('../utils/verificationStore.js');
+      const verificationResult = verificationStore.verifyToken(verificationToken);
 
-      const account = new Account(client);
+      if (!verificationResult) {
+        logger.warn('Invalid or expired verification token', {
+          tokenPreview: verificationToken.substring(0, 8) + '...'
+        });
+        throw new Error('Invalid or expired verification link');
+      }
 
-      // Confirm the email verification
-      await account.updateVerification(userId, secret);
+      const { userId, email } = verificationResult;
 
-      logger.info('Email verification confirmed', { userId });
+      // Mark user as verified in Appwrite using Users API (admin)
+      // Note: Appwrite doesn't have a direct "set as verified" method in Users API
+      // We need to update user preferences to track verification status
+      try {
+        const user = await this.users.get(userId);
+        const currentPrefs = user.prefs || {};
+        
+        const updatedPrefs = {
+          ...currentPrefs,
+          emailVerified: true,
+          emailVerifiedAt: new Date().toISOString()
+        };
+
+        await this.users.updatePrefs(userId, updatedPrefs);
+        
+        logger.info('User marked as verified in preferences', { 
+          userId, 
+          email,
+          verifiedAt: updatedPrefs.emailVerifiedAt
+        });
+      } catch (prefsError) {
+        logger.error('Failed to update verification status in user preferences', {
+          error: prefsError instanceof Error ? prefsError.message : 'Unknown error',
+          userId,
+          email
+        });
+        // Don't fail the verification process if preference update fails
+      }
+
+      logger.info('Email verification confirmed successfully', { userId, email });
+      
+      return { userId, email };
     } catch (error) {
       logger.error('Failed to confirm email verification', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        userId
+        tokenPreview: verificationToken.substring(0, 8) + '...'
       });
 
       if (error instanceof Error) {
-        if (error.message.includes('verification_invalid') ||
-          error.message.includes('Invalid verification')) {
-          throw new Error('Invalid or expired verification link');
+        if (error.message.includes('Invalid or expired verification link')) {
+          throw error; // Re-throw with original message
         }
       }
 
@@ -1190,12 +1234,6 @@ export class AppwriteAuthService implements IAuthService {
     const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
     const userId = payload.userId || payload.sub;
     
-    // Debug: Log the full payload to see what fields are available
-    logger.info('JWT payload contents', { 
-      payload: JSON.stringify(payload),
-      availableFields: Object.keys(payload)
-    });
-    
     // Use the full token as unique identifier since Appwrite JWTs don't have jti
     // We'll use a hash of the token for more compact storage
     const crypto = await import('crypto');
@@ -1203,6 +1241,12 @@ export class AppwriteAuthService implements IAuthService {
     
     // Check if JWT is blacklisted
     const { jwtBlacklist } = await import('../utils/jwtBlacklist.js');
+    logger.info('Checking JWT blacklist', { 
+      tokenHash,
+      blacklistStats: jwtBlacklist.getStats(),
+      isBlacklisted: jwtBlacklist.isBlacklisted(tokenHash)
+    });
+    
     if (jwtBlacklist.isBlacklisted(tokenHash)) {
       throw new Error('Token has been revoked');
     }
@@ -1218,6 +1262,8 @@ export class AppwriteAuthService implements IAuthService {
       email: appwriteUser.email,
       name: appwriteUser.name,
       avatar: prefs.avatar,
+      emailVerified: prefs.emailVerified || false,
+      emailVerifiedAt: prefs.emailVerifiedAt || null,
       subscription: {
         tier: prefs.subscription?.tier || 'free',
         validUntil: prefs.subscription?.validUntil,

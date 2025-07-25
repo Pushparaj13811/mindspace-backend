@@ -604,6 +604,14 @@ export class AuthController extends BaseController {
           set.status = HTTP_STATUS.BAD_REQUEST;
           return this.error('Email is already verified', HTTP_STATUS.BAD_REQUEST);
         }
+        if (error.message.includes('Token has been revoked')) {
+          set.status = HTTP_STATUS.UNAUTHORIZED;
+          return this.error('Session expired or invalid', HTTP_STATUS.UNAUTHORIZED);
+        }
+        if (error.message.includes('Invalid token')) {
+          set.status = HTTP_STATUS.UNAUTHORIZED;
+          return this.error('Invalid authentication token', HTTP_STATUS.UNAUTHORIZED);
+        }
       }
       
       return this.handleBusinessError(error as Error, set);
@@ -627,13 +635,8 @@ export class AuthController extends BaseController {
         query
       );
       
-      // Verify token using our custom verification store
-      const verificationResult = verificationStore.verifyToken(validatedQuery.token);
-      
-      if (!verificationResult) {
-        set.status = HTTP_STATUS.BAD_REQUEST;
-        return this.error('Invalid or expired verification link', HTTP_STATUS.BAD_REQUEST);
-      }
+      // Verify token using auth service (which updates Appwrite user preferences)
+      const verificationResult = await this.services.authService.confirmEmailVerification(validatedQuery.token);
       
       this.logAction('confirm_verification_success', verificationResult.userId, {
         email: verificationResult.email
@@ -652,6 +655,10 @@ export class AuthController extends BaseController {
       if (error instanceof Error) {
         if (error.message.includes('Validation error')) {
           return this.handleValidationError(error, set);
+        }
+        if (error.message.includes('Invalid or expired verification link')) {
+          set.status = HTTP_STATUS.BAD_REQUEST;
+          return this.error('Invalid or expired verification link', HTTP_STATUS.BAD_REQUEST);
         }
       }
       
