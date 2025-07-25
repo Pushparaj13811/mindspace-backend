@@ -1,0 +1,239 @@
+{
+  "collections": [
+    {
+      "name": "journals",
+      "attributes": [
+        {
+          "key": "userId",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 36,
+          "default": null
+        },
+        {
+          "key": "title",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 200,
+          "default": null
+        },
+        {
+          "key": "content",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 10000,
+          "default": null
+        },
+        {
+          "key": "mood",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 1000,
+          "default": null
+        },
+        {
+          "key": "tags",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": true,
+          "size": 50,
+          "default": null
+        },
+        {
+          "key": "aiInsights",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 2000,
+          "default": null
+        },
+        {
+          "key": "attachments",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 1000,
+          "default": null
+        },
+        {
+          "key": "encrypted",
+          "type": "boolean",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "default": false
+        }
+      ],
+      "indexes": [
+        {
+          "key": "userId_index",
+          "type": "key",
+          "status": "available",
+          "attributes": ["userId"],
+          "orders": ["ASC"]
+        },
+        {
+          "key": "createdAt_index",
+          "type": "key", 
+          "status": "available",
+          "attributes": ["$createdAt"],
+          "orders": ["DESC"]
+        }
+      ]
+    },
+    {
+      "name": "companies",
+      "attributes": [
+        {
+          "key": "name",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 100,
+          "default": null
+        },
+        {
+          "key": "domain",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 100,
+          "default": null
+        },
+        {
+          "key": "logo",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 255,
+          "default": null
+        },
+        {
+          "key": "adminId",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 36,
+          "default": null
+        },
+        {
+          "key": "settings",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 1000,
+          "default": null
+        },
+        {
+          "key": "subscription",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 1000,
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "key": "domain_index",
+          "type": "unique",
+          "status": "available", 
+          "attributes": ["domain"],
+          "orders": ["ASC"]
+        },
+        {
+          "key": "adminId_index",
+          "type": "key",
+          "status": "available",
+          "attributes": ["adminId"],
+          "orders": ["ASC"]
+        }
+      ]
+    },
+    {
+      "name": "moods",
+      "attributes": [
+        {
+          "key": "userId",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 36,
+          "default": null
+        },
+        {
+          "key": "current",
+          "type": "string",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "size": 20,
+          "default": null
+        },
+        {
+          "key": "intensity",
+          "type": "integer",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "min": 1,
+          "max": 10,
+          "default": null
+        },
+        {
+          "key": "timestamp",
+          "type": "datetime",
+          "status": "available",
+          "required": true,
+          "array": false,
+          "default": null
+        },
+        {
+          "key": "triggers",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": true,
+          "size": 100,
+          "default": null
+        },
+        {
+          "key": "notes",
+          "type": "string",
+          "status": "available",
+          "required": false,
+          "array": false,
+          "size": 500,
+          "default": null
+        }
+      ],
+      "indexes": [
+        {
+          "key": "userId_timestamp_index",
+          "type": "key",
+          "status": "available",
+          "attributes": ["userId", "timestamp"],
+          "orders": ["ASC", "DESC"]
+        }
+      ]
+    }
+  ]
+}
