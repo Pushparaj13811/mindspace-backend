@@ -10,6 +10,8 @@ import {
 import { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../utils/response.js';
 import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
 import { z } from 'zod';
+import { verificationStore } from '../utils/verificationStore.js';
+import crypto from 'crypto';
 
 /**
  * Authentication Controller
@@ -46,18 +48,21 @@ export class AuthController extends BaseController {
           await this.services.emailService.sendWelcomeEmail(user.email, user.name);
           this.logAction('welcome_email_sent', user.$id, { email: user.email });
           
-          // Always send verification email for now (since Appwrite might not be configured)
-          // Generate a simple verification token (in production, use crypto.randomBytes)
-          const verificationToken = Buffer.from(`${user.$id}:${Date.now()}`).toString('base64');
+          // Always send custom verification email
+          // Generate a secure verification token
+          const verificationToken = crypto.randomBytes(32).toString('hex');
+          
+          // Store the token in our verification store
+          verificationStore.storeToken(user.$id, user.email, verificationToken, 24); // 24 hours expiry
           
           await this.services.emailService.sendVerificationEmail(
             user.email, 
             user.name, 
             verificationToken
           );
-          this.logAction('verification_email_sent', user.$id, { 
+          this.logAction('custom_verification_email_sent', user.$id, { 
             email: user.email,
-            method: 'custom'
+            tokenPreview: verificationToken.substring(0, 8) + '...' // Log partial token for debugging
           });
           }
           
@@ -123,6 +128,47 @@ export class AuthController extends BaseController {
         if (error.message.includes('Invalid email or password')) {
           set.status = HTTP_STATUS.UNAUTHORIZED;
           return this.error(ERROR_MESSAGES.INVALID_CREDENTIALS, HTTP_STATUS.UNAUTHORIZED);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
+
+  /**
+   * Refresh access token
+   */
+  async refreshToken(context: { body: unknown; set: any }) {
+    const { body, set } = context;
+    
+    try {
+      this.logAction('refresh_token_attempt');
+      
+      const { refreshToken } = body as { refreshToken: string };
+      
+      if (!refreshToken) {
+        throw new Error('Validation error: Refresh token is required');
+      }
+      
+      // Refresh token through service
+      const tokens = await this.services.authService.refreshToken(refreshToken);
+      
+      this.logAction('refresh_token_success');
+      
+      return this.success(
+        { session: tokens }, 
+        'Token refreshed successfully'
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Validation error')) {
+          return this.handleValidationError(error, set);
+        }
+        if (error.message.includes('Refresh token expired') || 
+            error.message.includes('invalid')) {
+          set.status = HTTP_STATUS.UNAUTHORIZED;
+          return this.error('Invalid or expired refresh token', HTTP_STATUS.UNAUTHORIZED);
         }
       }
       
@@ -520,7 +566,7 @@ export class AuthController extends BaseController {
   }
 
   /**
-   * Confirm email verification
+   * Confirm email verification (custom verification)
    */
   async confirmVerification(context: { query: unknown; set: any }) {
     const { query, set } = context;
@@ -528,25 +574,32 @@ export class AuthController extends BaseController {
     try {
       this.logAction('confirm_verification_attempt');
       
-      // Validate query parameters
+      // Validate query parameters - only need token for custom verification
       const validatedQuery = this.validateQueryParams(
         z.object({
-          userId: z.string(),
-          secret: z.string()
+          token: z.string()
         }),
         query
       );
       
-      // Confirm email verification
-      await this.services.authService.confirmEmailVerification(
-        validatedQuery.userId,
-        validatedQuery.secret
-      );
+      // Verify token using our custom verification store
+      const verificationResult = verificationStore.verifyToken(validatedQuery.token);
       
-      this.logAction('confirm_verification_success', validatedQuery.userId);
+      if (!verificationResult) {
+        set.status = HTTP_STATUS.BAD_REQUEST;
+        return this.error('Invalid or expired verification link', HTTP_STATUS.BAD_REQUEST);
+      }
+      
+      this.logAction('confirm_verification_success', verificationResult.userId, {
+        email: verificationResult.email
+      });
       
       return this.success(
-        { verified: true },
+        { 
+          verified: true,
+          userId: verificationResult.userId,
+          email: verificationResult.email
+        },
         'Email verified successfully'
       );
       
@@ -554,10 +607,6 @@ export class AuthController extends BaseController {
       if (error instanceof Error) {
         if (error.message.includes('Validation error')) {
           return this.handleValidationError(error, set);
-        }
-        if (error.message.includes('Invalid or expired')) {
-          set.status = HTTP_STATUS.BAD_REQUEST;
-          return this.error('Invalid or expired verification link', HTTP_STATUS.BAD_REQUEST);
         }
       }
       

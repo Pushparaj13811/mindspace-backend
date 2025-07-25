@@ -9,6 +9,7 @@ export interface IAuthService {
   // Session management
   validateSession(sessionId: string): Promise<{ user: User; session: AuthTokens }>;
   refreshSession(sessionId: string): Promise<{ user: User; session: AuthTokens }>;
+  refreshToken(refreshToken: string): Promise<AuthTokens>;
   
   // User management
   getCurrentUser(sessionId: string): Promise<User>;

@@ -40,6 +40,22 @@ export const authRoutes = new Elysia()
     },
   })
 
+  // Refresh token endpoint
+  .post('/refresh', withServices(async (services, context) => {
+    const controller = new AuthController(services);
+    return await controller.refreshToken(context);
+  }), {
+    beforeHandle: rateLimitMiddleware,
+    body: t.Object({
+      refreshToken: t.String({ minLength: 1 }),
+    }),
+    detail: {
+      tags: ['Auth'],
+      summary: 'Refresh access token',
+      description: 'Generates a new access token using the refresh token',
+    },
+  })
+
   // Logout endpoint
   .post('/logout', withServices(async (services, context) => {
     const controller = new AuthController(services);
@@ -160,17 +176,14 @@ export const authRoutes = new Elysia()
     return await controller.confirmVerification(context);
   }), {
     query: t.Object({
-      userId: t.String({
-        description: 'User ID from the verification email'
-      }),
-      secret: t.String({
-        description: 'Secret token from the verification email'
+      token: t.String({
+        description: 'Verification token from the verification email'
       }),
     }),
     detail: {
       tags: ['Auth'],
       summary: 'Verify email address',
-      description: 'Confirms email verification using the link sent to user\'s email',
+      description: 'Confirms email verification using the custom token sent to user\'s email',
     },
   })
 
