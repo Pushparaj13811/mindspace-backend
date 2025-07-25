@@ -1,52 +1,69 @@
 import { BaseController } from './BaseController.js';
 import { HTTP_STATUS, SUCCESS_MESSAGES, ERROR_MESSAGES } from '../utils/response.js';
+import { 
+  aiChatSchema, 
+  aiAnalysisSchema, 
+  aiInsightsQuerySchema 
+} from '../utils/validation.js';
+import type { User, JournalEntry, MoodEntry } from '../types/index.js';
 
+/**
+ * AI Controller
+ * Handles all AI-related operations using the new service architecture
+ */
 export class AIController extends BaseController {
 
-  constructor(services: any) {
-    super(services);
-  }
-
   async chatWithAI(context: any) {
-    const { user, session, body, set } = context;
-    
-    try {
-      const { user: authUser } = this.requireAuth(user, session, set);
-      
-      this.logAction('ai_chat_request', authUser.$id);
-      
-      const { message, includeContext = true } = body;
-      
-      if (!message || typeof message !== 'string' || message.trim().length === 0) {
-        throw new Error('Validation error: Message is required');
-      }
+    const { body, set } = context;
 
-      if (message.length > 4000) {
-        throw new Error('Validation error: Message too long (max 4000 characters)');
-      }
+    try {
+      const user = this.getCurrentUser(context);
+
+      // Check permission for AI features
+      await this.requirePermission(user, 'use_ai_features');
+
+      this.logAction('ai_chat_request', user);
+
+      // Validate request body
+      const { message, includeContext = true } = this.validateRequestBody(aiChatSchema, body);
 
       let userContext;
       if (includeContext) {
         // Get recent user context for personalized responses
         try {
-          const recentMoods = await this.services.databaseService.getMoodHistory(
-            authUser.$id, 
-            { limit: 5, sortOrder: 'desc' }
+          // Get recent moods
+          const moodQueries = [
+            { field: 'userId', operator: 'equal' as const, value: user.$id }
+          ];
+          
+          const recentMoods = await this.services.databaseService.list<MoodEntry>(
+            'moods', 
+            moodQueries
+          );
+
+          // Get recent journal entries
+          const journalQueries = [
+            { field: 'userId', operator: 'equal' as const, value: user.$id }
+          ];
+          
+          const recentJournals = await this.services.databaseService.list<JournalEntry>(
+            'journals', 
+            journalQueries
           );
 
           userContext = {
-            recentMoods: recentMoods.documents,
-            journalThemes: [] // Could add recent journal themes here
+            recentMoods: recentMoods.documents.slice(0, 5),
+            recentJournals: recentJournals.documents.slice(0, 3)
           };
         } catch (error) {
           // Continue without context if we can't fetch it
-          this.logAction('context_fetch_failed', authUser.$id);
+          this.logAction('context_fetch_failed', user);
         }
       }
 
       const aiResponse = await this.services.aiService.chatWithAI(message, userContext);
 
-      this.logAction('ai_chat_response', authUser.$id, {
+      this.logAction('ai_chat_response', user, {
         messageLength: message.length,
         responseLength: aiResponse.response.length,
         hasContext: !!userContext
@@ -60,62 +77,49 @@ export class AIController extends BaseController {
       });
 
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'ai_chat_request');
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async analyzeJournal(context: any) {
-    const { user, session, body, set } = context;
-    
+    const { body, set } = context;
+
     try {
-      const { user: authUser } = this.requireAuth(user, session, set);
-      
-      this.logAction('ai_journal_analysis_request', authUser.$id);
-      
-      const { entryId } = body;
-      
-      if (!entryId) {
-        throw new Error('Validation error: Entry ID is required');
-      }
+      const user = this.getCurrentUser(context);
+
+      // Check permission for AI features
+      await this.requirePermission(user, 'use_ai_features');
+
+      this.logAction('ai_journal_analysis_request', user);
+
+      // Validate request body
+      const { entryId } = this.validateRequestBody(aiAnalysisSchema, body);
+
+      // Check resource access permission
+      await this.requireResourceAccess(user, 'journal', entryId, 'view');
 
       // Get the journal entry
-      const journalEntry = await this.services.databaseService.getJournalEntry(
-        entryId, 
-        authUser.$id
-      );
-
-      if (!journalEntry) {
-        set.status = HTTP_STATUS.NOT_FOUND;
-        return this.error('Journal entry not found', HTTP_STATUS.NOT_FOUND);
-      }
+      const journalEntry = await this.services.databaseService.read<JournalEntry>('journals', entryId);
 
       const analysis = await this.services.aiService.analyzeJournalEntry(journalEntry);
 
       // Update the journal entry with AI insights
       try {
-        await this.services.databaseService.updateJournalEntry(
+        await this.services.databaseService.update<JournalEntry>(
+          'journals',
           entryId,
-          authUser.$id,
           { aiInsights: analysis }
         );
       } catch (updateError) {
         // Log but don't fail the request if we can't update
-        this.logAction('ai_insights_update_failed', authUser.$id, {
+        this.logAction('ai_insights_update_failed', user, {
           entryId,
           error: updateError instanceof Error ? updateError.message : 'Unknown error'
         });
       }
 
-      this.logAction('ai_journal_analysis_complete', authUser.$id, {
+      this.logAction('ai_journal_analysis_complete', user, {
         entryId,
         sentiment: analysis.sentiment,
         emotionsCount: analysis.emotions?.length || 0
@@ -134,46 +138,60 @@ export class AIController extends BaseController {
       });
 
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'ai_journal_analysis_request');
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getMoodInsights(context: any) {
-    const { user, session, query, set } = context;
-    
+    const { query, set } = context;
+
     try {
-      const { user: authUser } = this.requireAuth(user, session, set);
-      
-      this.logAction('ai_mood_insights_request', authUser.$id);
-      
-      const { period = '30d' } = query || {};
-      
+      const user = this.getCurrentUser(context);
+
+      // Check permission for AI features
+      await this.requirePermission(user, 'use_ai_features');
+
+      this.logAction('ai_mood_insights_request', user);
+
+      // Validate query parameters
+      const queryParams = this.validateQueryParams(aiInsightsQuerySchema, query || {});
+      const { period = '30d' } = queryParams;
+
+      // Calculate date range and limit based on period
+      const now = new Date();
+      const dateFrom = new Date();
       let limit = 30;
+      
       switch (period) {
-        case '7d': limit = 20; break;
-        case '30d': limit = 60; break;
-        case '90d': limit = 180; break;
-        default: limit = 30;
+        case '7d': 
+          dateFrom.setDate(now.getDate() - 7);
+          limit = 20; 
+          break;
+        case '90d': 
+          dateFrom.setDate(now.getDate() - 90);
+          limit = 180; 
+          break;
+        case '1y': 
+          dateFrom.setFullYear(now.getFullYear() - 1);
+          limit = 365; 
+          break;
+        default: // 30d
+          dateFrom.setDate(now.getDate() - 30);
+          limit = 60;
       }
 
       // Get mood history
-      const moodHistory = await this.services.databaseService.getMoodHistory(
-        authUser.$id,
-        { limit, sortOrder: 'desc' }
-      );
+      const moodQueries = [
+        { field: 'userId', operator: 'equal' as const, value: user.$id },
+        { field: '$createdAt', operator: 'greaterEqual' as const, value: dateFrom.toISOString() }
+      ];
+      
+      const moodHistory = await this.services.databaseService.list<MoodEntry>('moods', moodQueries);
 
       const aiInsights = await this.services.aiService.generateMoodInsights(moodHistory.documents);
 
-      this.logAction('ai_mood_insights_complete', authUser.$id, {
+      this.logAction('ai_mood_insights_complete', user, {
         period,
         moodCount: moodHistory.documents.length,
         insightsCount: aiInsights.insights?.length || 0
@@ -190,38 +208,36 @@ export class AIController extends BaseController {
       });
 
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'ai_mood_insights_request');
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getWellnessContent(context: any) {
-    const { user, session, query, set } = context;
-    
+    const { query, set } = context;
+
     try {
-      const { user: authUser } = this.requireAuth(user, session, set);
-      
-      this.logAction('ai_wellness_content_request', authUser.$id);
-      
+      const user = this.getCurrentUser(context);
+
+      // Check permission for AI features
+      await this.requirePermission(user, 'use_ai_features');
+
+      this.logAction('ai_wellness_content_request', user);
+
       const { type = 'daily_affirmation' } = query || {};
-      
+
       const validTypes = ['daily_affirmation', 'mindfulness_tip', 'gratitude_prompt', 'breathing_exercise'];
       if (!validTypes.includes(type)) {
         throw new Error('Validation error: Invalid content type');
       }
 
       const userPreferences = {
-        interests: authUser.preferences?.interests || []
+        interests: user.preferences?.interests || []
       };
 
       const content = await this.services.aiService.generateWellnessContent(type, userPreferences);
 
-      this.logAction('ai_wellness_content_generated', authUser.$id, {
+      this.logAction('ai_wellness_content_generated', user, {
         type,
         contentLength: content.content.length
       });
@@ -235,26 +251,18 @@ export class AIController extends BaseController {
       });
 
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'ai_wellness_content_request');
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getAICapabilities(context: any) {
-    const { user, session, set } = context;
-    
+    const { set } = context;
+
     try {
-      const { user: authUser } = this.requireAuth(user, session, set);
-      
-      this.logAction('ai_capabilities_request', authUser.$id);
+      const user = this.getCurrentUser(context);
+
+      this.logAction('ai_capabilities_request', user);
 
       return this.success({
         capabilities: {
@@ -288,20 +296,17 @@ export class AIController extends BaseController {
       });
 
     } catch (error) {
-      if (error instanceof Error && error.message === 'Authentication required') {
-        return this.handleAuthError(error, set);
-      }
-      
+      this.logError(error as Error, 'ai_capabilities_request');
       return this.handleBusinessError(error as Error, set);
     }
   }
 
   async getAIHealth(context: any) {
     const { set } = context;
-    
+
     try {
       const isHealthy = await this.services.aiService.healthCheck();
-      
+
       if (isHealthy) {
         return this.success({
           status: 'healthy',

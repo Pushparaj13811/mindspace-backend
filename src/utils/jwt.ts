@@ -5,19 +5,38 @@ import type { AuthTokens } from '../types/index.js';
 interface JWTPayload {
   userId: string;
   email: string;
+  role?: string;
+  sessionId?: string;
   type: 'access' | 'refresh';
 }
 
+interface TokenData {
+  userId: string;
+  email: string;
+  role?: string;
+  sessionId?: string;
+}
+
 export class JWTService {
-  static generateTokens(userId: string, email: string): AuthTokens {
+  static generateTokens(userId: string, email: string): AuthTokens;
+  static generateTokens(data: TokenData): AuthTokens;
+  static generateTokens(userIdOrData: string | TokenData, email?: string): AuthTokens {
+    let tokenData: TokenData;
+    
+    if (typeof userIdOrData === 'string') {
+      tokenData = { userId: userIdOrData, email: email! };
+    } else {
+      tokenData = userIdOrData;
+    }
+
     const accessToken = jwt.sign(
-      { userId, email, type: 'access' },
+      { ...tokenData, type: 'access' },
       config.jwt.secret,
       { expiresIn: config.jwt.expireTime } as SignOptions
     );
 
     const refreshToken = jwt.sign(
-      { userId, email, type: 'refresh' },
+      { ...tokenData, type: 'refresh' },
       config.jwt.refreshSecret,
       { expiresIn: config.jwt.refreshExpireTime } as SignOptions
     );
@@ -160,3 +179,9 @@ class TokenBlacklist {
 }
 
 export const tokenBlacklist = new TokenBlacklist();
+
+// Export convenience functions for backward compatibility
+export const createTokens = JWTService.generateTokens.bind(JWTService);
+export const verifyToken = JWTService.verifyAccessToken.bind(JWTService);
+export const verifyAccessToken = JWTService.verifyAccessToken.bind(JWTService);
+export const verifyRefreshToken = JWTService.verifyRefreshToken.bind(JWTService);

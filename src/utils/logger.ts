@@ -119,6 +119,109 @@ export const logAuth = {
   }
 };
 
+export const logOAuth2 = {
+  initiate: (provider: string, successUrl?: string, failureUrl?: string, metadata?: Record<string, any>) => {
+    logger.info('OAuth2 Initiation', {
+      provider,
+      successUrl,
+      failureUrl,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_initiate',
+      ...metadata
+    });
+  },
+  
+  redirectCreated: (provider: string, redirectUrl: string, metadata?: Record<string, any>) => {
+    logger.info('OAuth2 Redirect Created', {
+      provider,
+      redirectUrl,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_redirect_created',
+      ...metadata
+    });
+  },
+  
+  callbackReceived: (provider: string, userId?: string, metadata?: Record<string, any>) => {
+    logger.info('OAuth2 Callback Received', {
+      provider,
+      userId,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_callback_received',
+      ...metadata
+    });
+  },
+  
+  success: (provider: string, userId: string, email: string, metadata?: Record<string, any>) => {
+    logger.info('OAuth2 Authentication Success', {
+      provider,
+      userId,
+      email,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_success',
+      ...metadata
+    });
+  },
+  
+  failure: (provider: string, error: string, userId?: string, metadata?: Record<string, any>) => {
+    logger.error('OAuth2 Authentication Failure', {
+      provider,
+      error,
+      userId,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_failure',
+      ...metadata
+    });
+  },
+  
+  sessionManagement: (action: 'list' | 'delete', provider: string, userId?: string, sessionCount?: number, metadata?: Record<string, any>) => {
+    logger.info('OAuth2 Session Management', {
+      action,
+      provider,
+      userId,
+      sessionCount,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_session_management',
+      ...metadata
+    });
+  },
+  
+  securityEvent: (event: string, provider: string, userId?: string, severity: 'low' | 'medium' | 'high' = 'medium', metadata?: Record<string, any>) => {
+    const logLevel = severity === 'high' ? 'error' : severity === 'medium' ? 'warn' : 'info';
+    
+    logger[logLevel]('OAuth2 Security Event', {
+      event,
+      provider,
+      userId,
+      severity,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_security_event',
+      ...metadata
+    });
+  },
+  
+  providerError: (provider: string, errorType: string, error: string, userId?: string, metadata?: Record<string, any>) => {
+    logger.error('OAuth2 Provider Error', {
+      provider,
+      errorType,
+      error,
+      userId,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_provider_error',
+      ...metadata
+    });
+  },
+  
+  configurationIssue: (provider: string, issue: string, metadata?: Record<string, any>) => {
+    logger.error('OAuth2 Configuration Issue', {
+      provider,
+      issue,
+      timestamp: new Date().toISOString(),
+      type: 'oauth2_configuration_issue',
+      ...metadata
+    });
+  }
+};
+
 export const logAI = {
   request: (model: string, prompt: string, userId: string) => {
     logger.info('AI Request', {

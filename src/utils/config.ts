@@ -19,6 +19,7 @@ export const config: Config = {
     databaseId: process.env.APPWRITE_DATABASE_ID || '',
     collections: {
       users: process.env.USERS_COLLECTION_ID || 'users',
+      companies: process.env.COMPANIES_COLLECTION_ID || 'companies',
       journals: process.env.JOURNALS_COLLECTION_ID || 'journals',
       moods: process.env.MOODS_COLLECTION_ID || 'moods',
       notifications: process.env.NOTIFICATIONS_COLLECTION_ID || 'notifications',
@@ -49,6 +50,19 @@ export const config: Config = {
   
   cors: {
     allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:8081').split(','),
+  },
+
+  email: {
+    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.EMAIL_PORT || '587'),
+    secure: process.env.EMAIL_SECURE === 'true',
+    user: process.env.EMAIL_USER || '',
+    password: process.env.EMAIL_PASSWORD || '',
+    from: process.env.EMAIL_FROM || 'noreply@mindspace.app',
+  },
+
+  app: {
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   },
 };
 
