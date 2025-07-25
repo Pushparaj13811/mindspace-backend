@@ -1,7 +1,10 @@
 import { Elysia, t } from 'elysia';
-import { withServices } from '../container/ServiceContainer.js';
-import { authMiddleware, rateLimitMiddleware } from '../middleware/auth.js';
+import { withServices, getService, SERVICE_KEYS } from '../core/container/ServiceContainer.js';
+import { AuthenticationMiddleware } from '../core/middleware/AuthenticationMiddleware.js';
 import { AuthController } from '../controllers/AuthController.js';
+
+// Get authentication middleware from container
+const authMiddleware = () => getService<AuthenticationMiddleware>(SERVICE_KEYS.AUTH_MIDDLEWARE);
 
 export const authRoutes = new Elysia()
 
@@ -10,7 +13,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.register(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       email: t.String({ format: 'email' }),
       password: t.String({ minLength: 8 }),
@@ -28,7 +30,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.login(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       email: t.String({ format: 'email' }),
       password: t.String({ minLength: 1 }),
@@ -45,7 +46,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.refreshToken(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       refreshToken: t.String({ minLength: 1 }),
     }),
@@ -58,10 +58,13 @@ export const authRoutes = new Elysia()
 
   // Logout endpoint
   .post('/logout', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
     return await controller.logout(context);
   }), {
-    beforeHandle: authMiddleware,
     detail: {
       tags: ['Auth'],
       summary: 'Logout user',
@@ -72,10 +75,13 @@ export const authRoutes = new Elysia()
 
   // Get current user profile
   .get('/me', withServices(async (services, context) => {
+    // Require authentication and set user on context
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
-    return await controller.getCurrentUser(context);
+    return await controller.getUserProfile(context);
   }), {
-    beforeHandle: authMiddleware,
     detail: {
       tags: ['Auth'],
       summary: 'Get current user profile',
@@ -86,10 +92,13 @@ export const authRoutes = new Elysia()
 
   // Update user profile
   .put('/profile', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
     return await controller.updateProfile(context);
   }), {
-    beforeHandle: authMiddleware,
     body: t.Object({
       name: t.Optional(t.String({ minLength: 2, maxLength: 100 })),
       avatar: t.Optional(t.String({ format: 'uri' })),
@@ -104,10 +113,13 @@ export const authRoutes = new Elysia()
 
   // Update user preferences
   .put('/preferences', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
     return await controller.updatePreferences(context);
   }), {
-    beforeHandle: authMiddleware,
     body: t.Object({
       theme: t.Optional(t.Union([t.Literal('light'), t.Literal('dark'), t.Literal('auto')])),
       notifications: t.Optional(t.Boolean()),
@@ -124,10 +136,13 @@ export const authRoutes = new Elysia()
 
   // Change password endpoint
   .put('/password', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
     return await controller.changePassword(context);
   }), {
-    beforeHandle: authMiddleware,
     body: t.Object({
       currentPassword: t.String({ minLength: 1 }),
       newPassword: t.String({ minLength: 8 }),
@@ -145,7 +160,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.requestPasswordReset(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       email: t.String({ format: 'email' }),
     }),
@@ -161,7 +175,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.confirmPasswordReset(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       token: t.String({ minLength: 1, description: 'Reset token from the password reset email' }),
       password: t.String({ minLength: 8, description: 'New password for the account' }),
@@ -175,10 +188,13 @@ export const authRoutes = new Elysia()
 
   // Resend email verification
   .post('/resend-verification', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
     const controller = new AuthController(services);
     return await controller.resendVerification(context);
   }), {
-    beforeHandle: authMiddleware,
     detail: {
       tags: ['Auth'],
       summary: 'Resend email verification',
@@ -209,7 +225,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.initiateOAuth2(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     body: t.Object({
       provider: t.Literal('google', {
         description: 'OAuth2 provider - currently only Google is supported'
@@ -271,7 +286,6 @@ export const authRoutes = new Elysia()
     const controller = new AuthController(services);
     return await controller.handleOAuth2Callback(context);
   }), {
-    beforeHandle: rateLimitMiddleware,
     query: t.Object({
       userId: t.String({
         description: 'User ID returned by OAuth2 provider after successful authentication'

@@ -40,13 +40,13 @@ export class AuthController extends BaseController {
           // Test email service connection first
           const emailConnected = await this.services.emailService.testConnection();
           if (!emailConnected) {
-            this.logError(new Error('Email service connection failed'), 'email_connection_test', user.$id);
+            this.logError(new Error('Email service connection failed'), 'email_connection_test', user);
             // Continue with registration even if email fails
           } else {
 
           // Send welcome email
           await this.services.emailService.sendWelcomeEmail(user.email, user.name);
-          this.logAction('welcome_email_sent', user.$id, { email: user.email });
+          this.logAction('welcome_email_sent', user, { email: user.email });
           
           // Always send custom verification email
           // Generate a secure verification token
@@ -60,7 +60,7 @@ export class AuthController extends BaseController {
             user.name, 
             verificationToken
           );
-          this.logAction('custom_verification_email_sent', user.$id, { 
+          this.logAction('custom_verification_email_sent', user, { 
             email: user.email,
             tokenPreview: verificationToken.substring(0, 8) + '...' // Log partial token for debugging
           });
@@ -68,13 +68,13 @@ export class AuthController extends BaseController {
           
         } catch (emailError) {
           // Log email error but don't fail registration
-          this.logError(emailError as Error, 'send_registration_emails', user.$id);
+          this.logError(emailError as Error, 'send_registration_emails', user);
         }
       } else {
-        this.logError(new Error('Email service not available'), 'email_service_check', user.$id);
+        this.logError(new Error('Email service not available'), 'email_service_check', user);
       }
       
-      this.logAction('register_success', user.$id, { email: user.email });
+      this.logAction('register_success', user, { email: user.email });
       
       set.status = HTTP_STATUS.CREATED;
       return this.success(
@@ -113,7 +113,7 @@ export class AuthController extends BaseController {
       // Login user through service
       const { user, session } = await this.services.authService.login(validatedData);
       
-      this.logAction('login_success', user.$id, { email: user.email });
+      this.logAction('login_success', user, { email: user.email });
       
       return this.success(
         { user, session }, 
@@ -206,24 +206,21 @@ export class AuthController extends BaseController {
   /**
    * Get current user profile
    */
-  async getCurrentUser(context: { user?: any; session?: string; set: any }) {
-    const { user, session, set } = context;
+  async getUserProfile(context: any) {
+    const { set } = context;
     
     try {
-      const { user: authUser, session: authSession } = this.requireAuth(user, session, set);
+      const user = this.getCurrentUser(context);
       
-      this.logAction('get_profile', authUser.$id);
+      this.logAction('get_profile', user);
       
-      // Get fresh user data
-      const userProfile = await this.services.authService.getCurrentUser(authSession);
+      // Get fresh user data using auth service
+      const userProfile = await this.services.authService.getUserById(user.$id);
       
       return this.success({ user: userProfile });
       
     } catch (error) {
-      if (error instanceof Error && error.message === 'Authentication required') {
-        return this.handleAuthError(error, set);
-      }
-      
+      this.logError(error as Error, 'get_profile');
       return this.handleBusinessError(error as Error, set);
     }
   }
@@ -231,29 +228,27 @@ export class AuthController extends BaseController {
   /**
    * Update user profile
    */
-  async updateProfile(context: { 
-    user?: any; 
-    session?: string; 
-    body: unknown; 
-    set: any 
-  }) {
-    const { user, session, body, set } = context;
+  async updateProfile(context: any) {
+    const { body, set } = context;
     
     try {
-      const { user: authUser, session: authSession } = this.requireAuth(user, session, set);
+      const user = this.getCurrentUser(context);
       
-      this.logAction('update_profile_attempt', authUser.$id);
+      // Check permission to update profile
+      await this.requirePermission(user, 'manage_profile');
+      
+      this.logAction('update_profile_attempt', user);
       
       // Validate request body
       const validatedData = this.validateRequestBody(updateProfileSchema, body);
       
       // Update profile through service
       const updatedUser = await this.services.authService.updateProfile(
-        authSession, 
+        user.$id, 
         validatedData
       );
       
-      this.logAction('update_profile_success', authUser.$id);
+      this.logAction('update_profile_success', user);
       
       return this.success(
         { user: updatedUser }, 
@@ -261,15 +256,7 @@ export class AuthController extends BaseController {
       );
       
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'update_profile_attempt');
       return this.handleBusinessError(error as Error, set);
     }
   }
@@ -277,29 +264,27 @@ export class AuthController extends BaseController {
   /**
    * Update user preferences
    */
-  async updatePreferences(context: { 
-    user?: any; 
-    session?: string; 
-    body: unknown; 
-    set: any 
-  }) {
-    const { user, session, body, set } = context;
+  async updatePreferences(context: any) {
+    const { body, set } = context;
     
     try {
-      const { user: authUser, session: authSession } = this.requireAuth(user, session, set);
+      const user = this.getCurrentUser(context);
       
-      this.logAction('update_preferences_attempt', authUser.$id);
+      // Check permission to update profile
+      await this.requirePermission(user, 'manage_profile');
+      
+      this.logAction('update_preferences_attempt', user);
       
       // Validate request body
       const validatedData = this.validateRequestBody(updatePreferencesSchema, body);
       
       // Update preferences through service
       const updatedUser = await this.services.authService.updatePreferences(
-        authSession, 
+        user.$id, 
         validatedData
       );
       
-      this.logAction('update_preferences_success', authUser.$id);
+      this.logAction('update_preferences_success', user);
       
       return this.success(
         { user: updatedUser }, 
@@ -307,15 +292,7 @@ export class AuthController extends BaseController {
       );
       
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-      }
-      
+      this.logError(error as Error, 'update_preferences_attempt');
       return this.handleBusinessError(error as Error, set);
     }
   }
@@ -323,18 +300,16 @@ export class AuthController extends BaseController {
   /**
    * Change user password
    */
-  async changePassword(context: { 
-    user?: any; 
-    session?: string; 
-    body: unknown; 
-    set: any 
-  }) {
-    const { user, session, body, set } = context;
+  async changePassword(context: any) {
+    const { body, set } = context;
     
     try {
-      const { user: authUser, session: authSession } = this.requireAuth(user, session, set);
+      const user = this.getCurrentUser(context);
       
-      this.logAction('change_password_attempt', authUser.$id);
+      // Check permission to change password
+      await this.requirePermission(user, 'manage_profile');
+      
+      this.logAction('change_password_attempt', user);
       
       const { currentPassword, newPassword } = body as { 
         currentPassword: string; 
@@ -351,31 +326,19 @@ export class AuthController extends BaseController {
       
       // Change password through service
       await this.services.authService.changePassword(
-        authSession, 
+        user.$id, 
         currentPassword, 
         newPassword
       );
       
-      this.logAction('change_password_success', authUser.$id);
+      this.logAction('change_password_success', user);
       
       return this.success(
         { message: 'Password changed successfully' }
       );
       
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          return this.handleAuthError(error, set);
-        }
-        if (error.message.includes('Validation error')) {
-          return this.handleValidationError(error, set);
-        }
-        if (error.message.includes('Current password is incorrect')) {
-          set.status = HTTP_STATUS.BAD_REQUEST;
-          return this.error('Current password is incorrect', HTTP_STATUS.BAD_REQUEST);
-        }
-      }
-      
+      this.logError(error as Error, 'change_password_attempt');
       return this.handleBusinessError(error as Error, set);
     }
   }
@@ -534,14 +497,14 @@ export class AuthController extends BaseController {
       if (this.services.emailService) {
         try {
           await this.services.emailService.sendWelcomeEmail(user.email, user.name);
-          this.logAction('oauth2_welcome_email_sent', user.$id, { email: user.email });
+          this.logAction('oauth2_welcome_email_sent', user, { email: user.email });
         } catch (emailError) {
           // Log email error but don't fail OAuth2 authentication
-          this.logError(emailError as Error, 'send_oauth2_welcome_email', user.$id);
+          this.logError(emailError as Error, 'send_oauth2_welcome_email', user);
         }
       }
       
-      this.logAction('oauth2_success', user.$id, { 
+      this.logAction('oauth2_success', user, { 
         email: user.email, 
         provider: 'google' 
       });
@@ -577,21 +540,27 @@ export class AuthController extends BaseController {
   /**
    * Resend email verification
    */
-  async resendVerification(context: { session?: string; set: any }) {
-    const { session, set } = context;
+  async resendVerification(context: any) {
+    const { set } = context;
     
     try {
-      this.logAction('resend_verification_attempt');
+      const user = this.getCurrentUser(context);
       
-      // Check authentication
-      if (!session) {
-        return this.handleAuthError(new Error('Authentication required'), set);
+      this.logAction('resend_verification_attempt', user);
+      
+      // Get fresh user data to check current verification status
+      const freshUser = await this.services.authService.getUserById(user.$id);
+      
+      // Check if email is already verified using fresh data
+      if (freshUser.emailVerified) {
+        set.status = HTTP_STATUS.BAD_REQUEST;
+        return this.error('Email is already verified', HTTP_STATUS.BAD_REQUEST);
       }
       
       // Create new email verification
-      await this.services.authService.createEmailVerification(session);
+      await this.services.authService.createEmailVerification(user.$id);
       
-      this.logAction('resend_verification_success');
+      this.logAction('resend_verification_success', user);
       
       return this.success(
         { message: 'Verification email sent successfully' },
@@ -599,21 +568,7 @@ export class AuthController extends BaseController {
       );
       
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message.includes('already verified')) {
-          set.status = HTTP_STATUS.BAD_REQUEST;
-          return this.error('Email is already verified', HTTP_STATUS.BAD_REQUEST);
-        }
-        if (error.message.includes('Token has been revoked')) {
-          set.status = HTTP_STATUS.UNAUTHORIZED;
-          return this.error('Session expired or invalid', HTTP_STATUS.UNAUTHORIZED);
-        }
-        if (error.message.includes('Invalid token')) {
-          set.status = HTTP_STATUS.UNAUTHORIZED;
-          return this.error('Invalid authentication token', HTTP_STATUS.UNAUTHORIZED);
-        }
-      }
-      
+      this.logError(error as Error, 'resend_verification_attempt');
       return this.handleBusinessError(error as Error, set);
     }
   }
@@ -638,7 +593,8 @@ export class AuthController extends BaseController {
       // Verify token using auth service (which updates Appwrite user preferences)
       const verificationResult = await this.services.authService.confirmEmailVerification(validatedQuery.token);
       
-      this.logAction('confirm_verification_success', verificationResult.userId, {
+      this.logAction('confirm_verification_success', undefined, {
+        userId: verificationResult.userId,
         email: verificationResult.email
       });
       

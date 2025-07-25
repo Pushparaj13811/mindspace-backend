@@ -1,4 +1,5 @@
-import type { ServiceContainer } from '../container/ServiceContainer.js';
+import type { ServiceContainer } from '../core/container/ServiceContainer.js';
+import type { User } from '../types/index.js';
 import { 
   createSuccessResponse, 
   createErrorResponse, 
@@ -8,11 +9,12 @@ import {
 import { logger } from '../utils/logger.js';
 import { validateBody, validateQuery, validateParams } from '../utils/validation.js';
 import { OAuth2ErrorHandler } from '../utils/OAuth2ErrorHandler.js';
+import { PermissionError } from '../core/middleware/PermissionGuard.js';
 import type { z } from 'zod';
 
 /**
  * Base controller class providing common functionality
- * All controllers should extend this class
+ * All controllers should extend this class and use the new service container
  */
 export abstract class BaseController {
   protected services: ServiceContainer;
@@ -57,6 +59,24 @@ export abstract class BaseController {
   }
 
   /**
+   * Handle permission errors from the new permission system
+   */
+  protected handlePermissionError(error: PermissionError, set: any) {
+    logger.error('Permission error', { 
+      error: error.message,
+      code: error.code,
+      controller: this.constructor.name
+    });
+    
+    set.status = error.statusCode;
+    return createErrorResponse(
+      error.statusCode,
+      error.message,
+      error.code
+    );
+  }
+
+  /**
    * Handle business logic errors
    */
   protected handleBusinessError(error: Error, set: any) {
@@ -66,7 +86,12 @@ export abstract class BaseController {
       controller: this.constructor.name
     });
     
-    // Check if this is an OAuth2-related error first
+    // Handle permission errors first
+    if (error instanceof PermissionError) {
+      return this.handlePermissionError(error, set);
+    }
+    
+    // Check if this is an OAuth2-related error
     if (OAuth2ErrorHandler.isOAuth2Error(error)) {
       OAuth2ErrorHandler.logOAuth2Error(error, {
         action: 'business_error_fallback',
@@ -154,39 +179,113 @@ export abstract class BaseController {
   }
 
   /**
-   * Ensure user is authenticated
+   * Get current user from context (set by authentication middleware)
    */
-  protected requireAuth(user: any, session: any, set: any) {
-    if (!user || !session) {
-      set.status = HTTP_STATUS.UNAUTHORIZED;
-      throw new Error('Authentication required');
+  protected getCurrentUser(context: any): User {
+    const user = context.user;
+    if (!user) {
+      throw new Error('User not found in context. Ensure authentication middleware is applied.');
     }
-    return { user, session };
+    return user;
   }
 
   /**
-   * Log controller action
+   * Check if user has permission (uses new permission service)
    */
-  protected logAction(action: string, userId?: string, metadata?: Record<string, any>) {
+  protected async hasPermission(user: User, permission: string): Promise<boolean> {
+    return await this.services.permissionService.hasPermission(user, permission as any);
+  }
+
+  /**
+   * Require user to have specific permission
+   */
+  protected async requirePermission(user: User, permission: string): Promise<void> {
+    const hasAccess = await this.hasPermission(user, permission);
+    if (!hasAccess) {
+      throw new PermissionError(`Access denied: Missing required permission '${permission}'`);
+    }
+  }
+
+  /**
+   * Check if user can access company data
+   */
+  protected async canAccessCompany(user: User, companyId: string): Promise<boolean> {
+    return await this.services.permissionService.canAccessCompany(user, companyId);
+  }
+
+  /**
+   * Require user to have access to company
+   */
+  protected async requireCompanyAccess(user: User, companyId: string): Promise<void> {
+    const hasAccess = await this.canAccessCompany(user, companyId);
+    if (!hasAccess) {
+      throw new PermissionError('Access denied: Cannot access company resources');
+    }
+  }
+
+  /**
+   * Check if user can access resource
+   */
+  protected async canAccessResource(user: User, resourceType: string, resourceId: string, action: string): Promise<boolean> {
+    return await this.services.permissionService.canAccessResource(user, resourceType, resourceId, action);
+  }
+
+  /**
+   * Require user to have access to resource
+   */
+  protected async requireResourceAccess(user: User, resourceType: string, resourceId: string, action: string): Promise<void> {
+    const hasAccess = await this.canAccessResource(user, resourceType, resourceId, action);
+    if (!hasAccess) {
+      throw new PermissionError(`Access denied: Cannot ${action} ${resourceType} resource`);
+    }
+  }
+
+  /**
+   * Log controller action with user context
+   */
+  protected logAction(action: string, user?: User, metadata?: Record<string, any>) {
     logger.info(`Controller action: ${action}`, {
       action,
-      userId,
+      userId: user?.$id,
+      userRole: user?.role,
       controller: this.constructor.name,
       ...metadata
     });
   }
 
   /**
-   * Log controller errors
+   * Log controller errors with user context
    */
-  protected logError(error: Error, action: string, userId?: string, metadata?: Record<string, any>) {
+  protected logError(error: Error, action: string, user?: User, metadata?: Record<string, any>) {
     logger.error(`Controller error: ${action}`, {
       action,
-      userId,
+      userId: user?.$id,
+      userRole: user?.role,
       controller: this.constructor.name,
       error: error.message,
       stack: error.stack,
       ...metadata
     });
+  }
+
+  /**
+   * Parse pagination parameters with defaults
+   */
+  protected parsePagination(page?: number, limit?: number) {
+    return {
+      page: page || 1,
+      limit: Math.min(limit || 20, 100), // Cap at 100
+      offset: ((page || 1) - 1) * (limit || 20)
+    };
+  }
+
+  /**
+   * Parse sort parameters with defaults
+   */
+  protected parseSort(sortBy?: string, sortOrder?: string) {
+    return {
+      sortBy: sortBy || 'createdAt',
+      sortOrder: (sortOrder === 'asc' || sortOrder === 'desc') ? sortOrder : 'desc'
+    };
   }
 }

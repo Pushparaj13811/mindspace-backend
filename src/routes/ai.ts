@@ -1,16 +1,21 @@
 import { Elysia, t } from 'elysia';
-import { withServices } from '../container/ServiceContainer.js';
-import { authMiddleware } from '../middleware/auth.js';
+import { withServices, getService, SERVICE_KEYS } from '../core/container/ServiceContainer.js';
+import { AuthenticationMiddleware } from '../core/middleware/AuthenticationMiddleware.js';
 import { AIController } from '../controllers/AIController.js';
+
+// Get authentication middleware from container
+const authMiddleware = () => getService<AuthenticationMiddleware>(SERVICE_KEYS.AUTH_MIDDLEWARE);
 
 export const aiRoutes = new Elysia()
   
   // Chat with AI
   .post('/chat', withServices(async (services, context) => {
+    // Require authentication with AI features permission
+    const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    
     const controller = new AIController(services);
     return await controller.chatWithAI(context);
   }), {
-    beforeHandle: authMiddleware,
     body: t.Object({
       message: t.String({ 
         minLength: 1, 
@@ -32,10 +37,12 @@ export const aiRoutes = new Elysia()
 
   // Analyze journal entry
   .post('/analyze/journal', withServices(async (services, context) => {
+    // Require authentication with AI features permission
+    const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    
     const controller = new AIController(services);
     return await controller.analyzeJournal(context);
   }), {
-    beforeHandle: authMiddleware,
     body: t.Object({
       entryId: t.String({ 
         minLength: 1,
@@ -52,10 +59,12 @@ export const aiRoutes = new Elysia()
 
   // Get mood insights
   .get('/insights/mood', withServices(async (services, context) => {
+    // Require authentication with AI features permission
+    const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    
     const controller = new AIController(services);
     return await controller.getMoodInsights(context);
   }), {
-    beforeHandle: authMiddleware,
     query: t.Optional(t.Object({
       period: t.Optional(t.Union([
         t.Literal('7d'),
@@ -76,10 +85,12 @@ export const aiRoutes = new Elysia()
 
   // Generate wellness content
   .get('/content/wellness', withServices(async (services, context) => {
+    // Require authentication with AI features permission
+    const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    
     const controller = new AIController(services);
     return await controller.getWellnessContent(context);
   }), {
-    beforeHandle: authMiddleware,
     query: t.Optional(t.Object({
       type: t.Optional(t.Union([
         t.Literal('daily_affirmation'),
@@ -101,10 +112,12 @@ export const aiRoutes = new Elysia()
 
   // Get AI capabilities
   .get('/capabilities', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    
     const controller = new AIController(services);
     return await controller.getAICapabilities(context);
   }), {
-    beforeHandle: authMiddleware,
     detail: {
       tags: ['AI'],
       summary: 'Get AI capabilities',
