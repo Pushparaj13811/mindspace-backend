@@ -3,7 +3,8 @@ import { container, SERVICE_KEYS } from '../container/ServiceContainer.js';
 import type { IAuthService } from '../interfaces/IAuthService.js';
 import { createErrorResponse, HTTP_STATUS, ERROR_MESSAGES } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
-import type { User } from '../types/index.js';
+import type { User, UserRole, Permission } from '../types/index.js';
+import { hasPermission, hasAnyPermission, canAccessCompany, canManageUser } from '../utils/permissions.js';
 
 // Context interface for auth middleware
 interface AuthContext {
@@ -105,8 +106,8 @@ export const optionalAuthMiddleware = async (context: any) => {
   }
 };
 
-// Role-based access control
-export const requireRole = (requiredRole: 'free' | 'premium' | 'enterprise') => {
+// Permission-based access control
+export const requirePermission = (permission: Permission) => {
   return async (context: any) => {
     if (!context.user) {
       return createErrorResponse(
@@ -115,23 +116,110 @@ export const requireRole = (requiredRole: 'free' | 'premium' | 'enterprise') => 
       );
     }
 
-    const userRole = context.user.subscription.tier;
-    
-    // Define role hierarchy
-    const roleHierarchy = {
-      free: 0,
-      premium: 1,
-      enterprise: 2,
-    };
-
-    if ((roleHierarchy as any)[userRole] < (roleHierarchy as any)[requiredRole]) {
+    if (!hasPermission(context.user, permission)) {
       return createErrorResponse(
         HTTP_STATUS.FORBIDDEN,
         ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
-        `This feature requires ${requiredRole} subscription`
+        `This action requires '${permission}' permission`
       );
     }
   };
+};
+
+// Require any of the specified permissions
+export const requireAnyPermission = (permissions: Permission[]) => {
+  return async (context: any) => {
+    if (!context.user) {
+      return createErrorResponse(
+        HTTP_STATUS.UNAUTHORIZED,
+        ERROR_MESSAGES.UNAUTHORIZED
+      );
+    }
+
+    if (!hasAnyPermission(context.user, permissions)) {
+      return createErrorResponse(
+        HTTP_STATUS.FORBIDDEN,
+        ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
+        `This action requires one of these permissions: ${permissions.join(', ')}`
+      );
+    }
+  };
+};
+
+// Role-based access control (legacy support)
+export const requireRole = (requiredRole: UserRole) => {
+  return async (context: any) => {
+    if (!context.user) {
+      return createErrorResponse(
+        HTTP_STATUS.UNAUTHORIZED,
+        ERROR_MESSAGES.UNAUTHORIZED
+      );
+    }
+
+    if (context.user.role !== requiredRole) {
+      return createErrorResponse(
+        HTTP_STATUS.FORBIDDEN,
+        ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
+        `This action requires '${requiredRole}' role`
+      );
+    }
+  };
+};
+
+// Company access control
+export const requireCompanyAccess = (context: any) => {
+  if (!context.user) {
+    return createErrorResponse(
+      HTTP_STATUS.UNAUTHORIZED,
+      ERROR_MESSAGES.UNAUTHORIZED
+    );
+  }
+
+  const companyId = context.params?.companyId || context.body?.companyId;
+  if (companyId && !canAccessCompany(context.user, companyId)) {
+    return createErrorResponse(
+      HTTP_STATUS.FORBIDDEN,
+      ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
+      'You do not have access to this company'
+    );
+  }
+};
+
+// Super admin only access
+export const requireSuperAdmin = async (context: any) => {
+  if (!context.user) {
+    return createErrorResponse(
+      HTTP_STATUS.UNAUTHORIZED,
+      ERROR_MESSAGES.UNAUTHORIZED
+    );
+  }
+
+  if (context.user.role !== 'SUPER_ADMIN') {
+    return createErrorResponse(
+      HTTP_STATUS.FORBIDDEN,
+      ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
+      'This action requires super admin privileges'
+    );
+  }
+};
+
+// Company admin or above access
+export const requireCompanyAdmin = async (context: any) => {
+  if (!context.user) {
+    return createErrorResponse(
+      HTTP_STATUS.UNAUTHORIZED,
+      ERROR_MESSAGES.UNAUTHORIZED
+    );
+  }
+
+  const validRoles: UserRole[] = ['SUPER_ADMIN', 'COMPANY_ADMIN'];
+  if (!validRoles.includes(context.user.role)) {
+    return createErrorResponse(
+      HTTP_STATUS.FORBIDDEN,
+      ERROR_MESSAGES.INSUFFICIENT_PERMISSIONS,
+      'This action requires company admin privileges or higher'
+    );
+  }
 };
 
 // Check subscription validity
@@ -172,11 +260,33 @@ export const checkSubscription = async (context: any) => {
   }
 };
 
-// Rate limiting based on user tier
-export const tierBasedRateLimit = {
-  free: { requests: 100, window: 15 * 60 * 1000 }, // 100 req/15min
-  premium: { requests: 500, window: 15 * 60 * 1000 }, // 500 req/15min
-  enterprise: { requests: 2000, window: 15 * 60 * 1000 }, // 2000 req/15min
+// Rate limiting based on user role and subscription
+export const roleBasedRateLimit = {
+  INDIVIDUAL_USER: {
+    free: { requests: 100, window: 15 * 60 * 1000 },
+    premium: { requests: 500, window: 15 * 60 * 1000 },
+    enterprise: { requests: 1000, window: 15 * 60 * 1000 }
+  },
+  COMPANY_USER: {
+    free: { requests: 200, window: 15 * 60 * 1000 },
+    premium: { requests: 1000, window: 15 * 60 * 1000 },
+    enterprise: { requests: 2000, window: 15 * 60 * 1000 }
+  },
+  COMPANY_MANAGER: {
+    free: { requests: 300, window: 15 * 60 * 1000 },
+    premium: { requests: 1500, window: 15 * 60 * 1000 },
+    enterprise: { requests: 3000, window: 15 * 60 * 1000 }
+  },
+  COMPANY_ADMIN: {
+    free: { requests: 500, window: 15 * 60 * 1000 },
+    premium: { requests: 2000, window: 15 * 60 * 1000 },
+    enterprise: { requests: 5000, window: 15 * 60 * 1000 }
+  },
+  SUPER_ADMIN: {
+    free: { requests: 10000, window: 15 * 60 * 1000 },
+    premium: { requests: 10000, window: 15 * 60 * 1000 },
+    enterprise: { requests: 10000, window: 15 * 60 * 1000 }
+  }
 };
 
 // Simple in-memory rate limiter (in production, use Redis)
@@ -184,12 +294,15 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 
 export const rateLimitMiddleware = async (context: any) => {
   const user = context.user;
+  const role = user?.role || 'INDIVIDUAL_USER';
   const tier = user?.subscription.tier || 'free';
   const userId = user?.$id || context.headers?.['x-forwarded-for'] || 'anonymous';
   
-  const limit = (tierBasedRateLimit as any)[tier];
+  const roleLimit = (roleBasedRateLimit as any)[role];
+  const limit = roleLimit ? roleLimit[tier] : roleBasedRateLimit.INDIVIDUAL_USER.free;
+  
   const now = Date.now();
-  const key = `${userId}:${tier}`;
+  const key = `${userId}:${role}:${tier}`;
   
   let userLimit = rateLimitStore.get(key);
   
