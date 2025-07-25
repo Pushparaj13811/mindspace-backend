@@ -36,7 +36,13 @@ export const oauth2CallbackSchema = z.object({
 export const moodStateSchema = z.object({
   current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed']),
   intensity: z.number().min(1).max(10),
-  timestamp: z.string().datetime(),
+  timestamp: z.string().datetime().optional().or(z.literal("")).transform((val) => {
+    // If empty string or not provided, use current timestamp
+    if (!val || val === "") {
+      return new Date().toISOString();
+    }
+    return val;
+  }),
   triggers: z.array(z.string()).optional(),
   notes: z.string().max(500).optional(),
 });
@@ -46,6 +52,21 @@ export const moodLogSchema = z.object({
   intensity: z.number().min(1, 'Intensity must be between 1 and 10').max(10, 'Intensity must be between 1 and 10'),
   triggers: z.array(z.string()).optional(),
   notes: z.string().max(500, 'Notes must be less than 500 characters').optional(),
+});
+
+export const moodQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  sortBy: z.enum(['timestamp', 'intensity', 'current']).default('timestamp'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  mood: z.string().optional(),
+  minIntensity: z.coerce.number().min(1).max(10).optional(),
+  maxIntensity: z.coerce.number().min(1).max(10).optional(),
+  period: z.enum(['7d', '30d', '90d', '1y']).optional(),
+  userId: z.string().optional(),
+  companyId: z.string().optional(),
 });
 
 // Journal schemas
@@ -59,8 +80,14 @@ export const createJournalSchema = z.object({
   mood: moodStateSchema,
   tags: z.array(z.string().max(50)).max(20, 'Maximum 20 tags allowed').optional(),
   attachments: z.object({
-    images: z.array(z.string()).max(10, 'Maximum 10 images allowed').optional(),
-    voiceRecording: z.string().optional(),
+    images: z.array(z.string()).max(10, 'Maximum 10 images allowed').optional().transform((arr) => {
+      // Filter out empty strings
+      return arr?.filter(img => img && img.trim() !== "") || [];
+    }),
+    voiceRecording: z.string().optional().transform((val) => {
+      // Return undefined if empty string
+      return val && val.trim() !== "" ? val : undefined;
+    }),
   }).optional(),
 });
 
@@ -99,6 +126,22 @@ export const aiRequestSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
 });
 
+export const aiChatSchema = z.object({
+  message: z.string()
+    .min(1, 'Message is required')
+    .max(4000, 'Message must be less than 4,000 characters'),
+  includeContext: z.boolean().default(true),
+});
+
+export const aiAnalysisSchema = z.object({
+  entryId: z.string().min(1, 'Entry ID is required'),
+});
+
+export const aiInsightsQuerySchema = z.object({
+  period: z.enum(['7d', '30d', '90d', '1y']).default('30d'),
+  includeRecommendations: z.boolean().default(true),
+});
+
 export const journalAnalysisSchema = z.object({
   entryId: z.string().min(1, 'Entry ID is required'),
 });
@@ -135,6 +178,47 @@ export const idParamSchema = z.object({
   id: z.string().min(1, 'ID is required'),
 });
 
+export const companyIdParamSchema = z.object({
+  companyId: z.string().min(1, 'Company ID is required'),
+});
+
+// Company schemas
+export const createCompanySchema = z.object({
+  name: z.string().min(2).max(100),
+  domain: z.string().email().transform(val => val.split('@')[1]),
+  settings: z.object({
+    allowSelfRegistration: z.boolean().optional(),
+    requireEmailVerification: z.boolean().optional(),
+    dataRetentionDays: z.number().min(30).max(2555).optional(), // ~7 years max
+  }).optional(),
+});
+
+export const updateCompanySchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  domain: z.string().email().transform(val => val.split('@')[1]).optional(),
+  logo: z.string().url().optional(),
+  settings: z.object({
+    allowSelfRegistration: z.boolean().optional(),
+    requireEmailVerification: z.boolean().optional(),
+    dataRetentionDays: z.number().min(30).max(2555).optional(),
+  }).optional(),
+});
+
+export const inviteUserSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(['COMPANY_ADMIN', 'COMPANY_MANAGER', 'COMPANY_USER']),
+  name: z.string().min(2).max(100).optional(),
+});
+
+export const acceptInviteSchema = z.object({
+  name: z.string().min(2).max(100),
+  password: z.string().min(8).max(128),
+});
+
+export const updateUserRoleSchema = z.object({
+  role: z.enum(['COMPANY_ADMIN', 'COMPANY_MANAGER', 'COMPANY_USER']),
+});
+
 // Notification schema
 export const notificationSchema = z.object({
   title: z.string().min(1).max(100),
@@ -147,6 +231,7 @@ export const notificationSchema = z.object({
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type MoodLogInput = z.infer<typeof moodLogSchema>;
+export type MoodQueryInput = z.infer<typeof moodQuerySchema>;
 export type CreateJournalInput = z.infer<typeof createJournalSchema>;
 export type UpdateJournalInput = z.infer<typeof updateJournalSchema>;
 export type JournalQueryInput = z.infer<typeof journalQuerySchema>;

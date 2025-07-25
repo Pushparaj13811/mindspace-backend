@@ -21,6 +21,26 @@ class JWTBlacklist {
   }
 
   /**
+   * Blacklist a JWT token (backward compatibility)
+   */
+  add(token: string): void {
+    // For backward compatibility, treat the token as JTI
+    const now = Date.now();
+    const expiresAt = now + (24 * 60 * 60 * 1000); // Default 24 hours
+    
+    this.blacklistedTokens.set(token, {
+      jti: token,
+      userId: 'unknown',
+      blacklistedAt: now,
+      expiresAt
+    });
+
+    logger.info('JWT token blacklisted', {
+      jti: token.substring(0, 8) + '...'
+    });
+  }
+
+  /**
    * Blacklist a JWT token
    */
   blacklistToken(jti: string, userId: string, expiresAt: number): void {
@@ -41,10 +61,10 @@ class JWTBlacklist {
   }
 
   /**
-   * Check if a JWT token is blacklisted
+   * Check if a JWT token is blacklisted (backward compatibility)
    */
-  isBlacklisted(jti: string): boolean {
-    const blacklistedToken = this.blacklistedTokens.get(jti);
+  isBlacklisted(token: string): boolean {
+    const blacklistedToken = this.blacklistedTokens.get(token);
     
     if (!blacklistedToken) {
       return false;
@@ -52,12 +72,12 @@ class JWTBlacklist {
 
     // Check if token has expired (automatically unblacklisted)
     if (Date.now() > blacklistedToken.expiresAt) {
-      this.blacklistedTokens.delete(jti);
+      this.blacklistedTokens.delete(token);
       return false;
     }
 
     logger.warn('Attempted use of blacklisted JWT token', {
-      jti: jti.substring(0, 8) + '...',
+      jti: token.substring(0, 8) + '...',
       userId: blacklistedToken.userId,
       blacklistedAt: new Date(blacklistedToken.blacklistedAt).toISOString()
     });
