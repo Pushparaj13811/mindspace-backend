@@ -13,6 +13,7 @@ import { authRoutes } from './routes/auth.js';
 import { journalRoutes } from './routes/journal.js';
 import { moodRoutes } from './routes/mood.js';
 import { aiRoutes } from './routes/ai.js';
+import { companyRoutes } from './routes/company.js';
 
 async function startServer() {
   try {
@@ -352,6 +353,7 @@ async function startServer() {
       .group('/api/v1/journal', (app) => app.use(journalRoutes))
       .group('/api/v1/mood', (app) => app.use(moodRoutes))
       .group('/api/v1/ai', (app) => app.use(aiRoutes))
+      .group('/api/v1', (app) => app.use(companyRoutes))
       
       // Catch-all 404 handler
       .all('*', () => {

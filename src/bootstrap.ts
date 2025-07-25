@@ -1,6 +1,7 @@
 import { container, SERVICE_KEYS } from './container/ServiceContainer.js';
 import { AppwriteAuthService } from './services/AppwriteAuthService.js';
 import { AppwriteDatabaseService } from './services/AppwriteDatabaseService.js';
+import { AppwriteCompanyService } from './services/AppwriteCompanyService.js';
 import { GeminiAIService } from './services/GeminiAIService.js';
 import { EmailService } from './services/EmailService.js';
 import { config, validateConfig } from './utils/config.js';
@@ -65,6 +66,12 @@ async function registerServices(): Promise<void> {
     return new EmailService();
   });
 
+  // Register Company Service (Appwrite implementation)
+  container.register(SERVICE_KEYS.COMPANY_SERVICE, () => {
+    logger.info('Creating AppwriteCompanyService instance');
+    return new AppwriteCompanyService();
+  });
+
   // TODO: Register other services as we implement them
   // container.register(SERVICE_KEYS.FILE_SERVICE, () => new AppwriteFileService());
   // container.register(SERVICE_KEYS.NOTIFICATION_SERVICE, () => new ExpoNotificationService());
@@ -75,6 +82,7 @@ async function registerServices(): Promise<void> {
       SERVICE_KEYS.DATABASE_SERVICE,
       SERVICE_KEYS.AI_SERVICE,
       SERVICE_KEYS.EMAIL_SERVICE,
+      SERVICE_KEYS.COMPANY_SERVICE,
     ]
   });
 }
@@ -106,6 +114,17 @@ async function testServiceConnections(): Promise<void> {
     });
   } catch (error) {
     logger.warn('Email service not available for health check');
+  }
+
+  // Test company service connection
+  try {
+    const companyService = container.resolve<any>(SERVICE_KEYS.COMPANY_SERVICE);
+    connectionTests.push({
+      name: 'Company Service',
+      test: () => companyService.healthCheck()
+    });
+  } catch (error) {
+    logger.warn('Company service not available for health check');
   }
 
   // Run all connection tests

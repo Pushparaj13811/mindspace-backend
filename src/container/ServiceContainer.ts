@@ -4,6 +4,7 @@ import type { IAIService } from '../interfaces/IAIService.js';
 import type { IFileService } from '../interfaces/IFileService.js';
 import type { INotificationService } from '../interfaces/INotificationService.js';
 import type { IEmailService } from '../interfaces/IEmailService.js';
+import type { ICompanyService } from '../interfaces/ICompanyService.js';
 
 export interface ServiceContainer {
   authService: IAuthService;
@@ -12,6 +13,7 @@ export interface ServiceContainer {
   fileService: IFileService;
   notificationService: INotificationService;
   emailService: IEmailService;
+  companyService: ICompanyService;
 }
 
 export interface ServiceRegistry {
@@ -71,6 +73,7 @@ export const SERVICE_KEYS = {
   FILE_SERVICE: 'fileService',
   NOTIFICATION_SERVICE: 'notificationService',
   EMAIL_SERVICE: 'emailService',
+  COMPANY_SERVICE: 'companyService',
 } as const;
 
 // Helper function to get all services as a typed container
@@ -87,6 +90,9 @@ export function getServices(): ServiceContainer {
       : null as any,
     emailService: container.isRegistered(SERVICE_KEYS.EMAIL_SERVICE) 
       ? container.resolve<IEmailService>(SERVICE_KEYS.EMAIL_SERVICE) 
+      : null as any,
+    companyService: container.isRegistered(SERVICE_KEYS.COMPANY_SERVICE) 
+      ? container.resolve<ICompanyService>(SERVICE_KEYS.COMPANY_SERVICE) 
       : null as any,
   };
 }

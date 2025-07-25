@@ -19,6 +19,7 @@ export const config: Config = {
     databaseId: process.env.APPWRITE_DATABASE_ID || '',
     collections: {
       users: process.env.USERS_COLLECTION_ID || 'users',
+      companies: process.env.COMPANIES_COLLECTION_ID || 'companies',
       journals: process.env.JOURNALS_COLLECTION_ID || 'journals',
       moods: process.env.MOODS_COLLECTION_ID || 'moods',
       notifications: process.env.NOTIFICATIONS_COLLECTION_ID || 'notifications',
