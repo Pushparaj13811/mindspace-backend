@@ -67,7 +67,7 @@ export interface User {
 }
 
 export interface MoodState {
-  current: 'happy' | 'sad' | 'anxious' | 'calm' | 'energetic' | 'depressed';
+  current: 'happy' | 'sad' | 'anxious' | 'calm' | 'energetic' | 'depressed' | 'excited' | 'angry' | 'peaceful' | 'stressed';
   intensity: number; // 1-10
   timestamp: string;
   triggers?: string[];
