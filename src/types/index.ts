@@ -76,14 +76,26 @@ export interface MoodState {
 
 export interface MoodEntry {
   $id: string;
+  $createdAt: string;
+  $updatedAt: string;
   userId: string;
   mood: MoodState;
+  // Extended mood tracking fields
+  location?: string;
+  weather?: string;
+  activities?: string[];
+  sleepQuality?: number;
+  stressLevel?: number;
+  energyLevel?: number;
+  socialInteraction?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface JournalEntry {
   $id: string;
+  $createdAt: string;
+  $updatedAt: string;
   userId: string;
   title: string;
   content: string;

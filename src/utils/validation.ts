@@ -79,12 +79,14 @@ export const moodLogSchema = z.object({
   }),
   triggers: z.array(z.string().max(100)).max(10, 'Maximum 10 triggers allowed').optional(),
   notes: z.string().max(500, 'Notes must be less than 500 characters').optional(),
-  context: z.object({
-    location: z.string().max(100).optional(),
-    activity: z.string().max(100).optional(),
-    weather: z.string().max(50).optional(),
-    socialSituation: z.string().max(100).optional(),
-  }).optional(),
+  // Extended mood tracking fields (flattened for database compatibility)
+  location: z.string().max(200).optional(),
+  weather: z.string().max(50).optional(),
+  activities: z.array(z.string().max(100)).max(10, 'Maximum 10 activities').optional(),
+  sleepQuality: z.number().min(1).max(10).optional(),
+  stressLevel: z.number().min(1).max(10).optional(),
+  energyLevel: z.number().min(1).max(10).optional(),
+  socialInteraction: z.string().max(50).optional(),
 });
 
 export const moodQuerySchema = z.object({

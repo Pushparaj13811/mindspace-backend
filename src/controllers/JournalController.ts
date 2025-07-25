@@ -61,7 +61,7 @@ export class JournalController extends BaseController {
         encrypted: false
       };
       
-      const journalEntry = await this.services.databaseService.create<JournalEntry>('journals', journalData);
+      const journalEntry = await this.services.databaseService.create<any>('journals', journalData);
       
       this.logAction('journal_entry_created', user, { 
         entryId: journalEntry.$id 

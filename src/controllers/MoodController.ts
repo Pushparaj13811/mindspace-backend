@@ -33,21 +33,25 @@ export class MoodController extends BaseController {
       // Validate request body
       const validatedData = this.validateRequestBody(moodLogSchema, body);
       
-      // Create mood entry through database service
+      // Create mood entry through database service (flattened for Appwrite)
       const moodData = {
         userId: user.$id,
-        mood: {
-          current: validatedData.current,
-          intensity: validatedData.intensity,
-          timestamp: new Date().toISOString(),
-          triggers: validatedData.triggers,
-          notes: validatedData.notes
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        current: validatedData.current,
+        intensity: validatedData.intensity,
+        timestamp: validatedData.timestamp || new Date().toISOString(),
+        triggers: validatedData.triggers || [],
+        notes: validatedData.notes || '',
+        // Additional optional fields (will be null/empty if not provided)
+        location: validatedData.location || '',
+        weather: validatedData.weather || '',
+        activities: validatedData.activities || [],
+        sleepQuality: validatedData.sleepQuality || null,
+        stressLevel: validatedData.stressLevel || null,
+        energyLevel: validatedData.energyLevel || null,
+        socialInteraction: validatedData.socialInteraction || ''
       };
       
-      const moodEntry = await this.services.databaseService.create<MoodEntry>('moods', moodData);
+      const moodEntry = await this.services.databaseService.create<any>('moods', moodData);
       
       this.logAction('mood_logged', user, { 
         moodId: moodEntry.$id,
@@ -55,9 +59,12 @@ export class MoodController extends BaseController {
         intensity: validatedData.intensity 
       });
       
+      // Transform flat data back to nested structure for API response
+      const transformedMood = this.transformMoodToResponse(moodEntry);
+      
       set.status = HTTP_STATUS.CREATED;
       return this.success(
-        { mood: moodEntry }, 
+        { mood: transformedMood }, 
         SUCCESS_MESSAGES.MOOD_LOGGED, 
         HTTP_STATUS.CREATED
       );
@@ -101,15 +108,15 @@ export class MoodController extends BaseController {
       }
       
       if (queryParams.mood) {
-        queries.push({ field: 'mood.current', operator: 'equal', value: queryParams.mood });
+        queries.push({ field: 'current', operator: 'equal', value: queryParams.mood });
       }
       
       if (queryParams.minIntensity) {
-        queries.push({ field: 'mood.intensity', operator: 'greaterEqual', value: queryParams.minIntensity });
+        queries.push({ field: 'intensity', operator: 'greaterEqual', value: queryParams.minIntensity });
       }
       
       if (queryParams.maxIntensity) {
-        queries.push({ field: 'mood.intensity', operator: 'lessEqual', value: queryParams.maxIntensity });
+        queries.push({ field: 'intensity', operator: 'lessEqual', value: queryParams.maxIntensity });
       }
       
       // Get mood history through database service
@@ -120,8 +127,11 @@ export class MoodController extends BaseController {
         total: result.total 
       });
       
+      // Transform flat data to nested structure for API response
+      const transformedMoods = result.documents.map(mood => this.transformMoodToResponse(mood));
+      
       return this.success({
-        moods: result.documents,
+        moods: transformedMoods,
         pagination: {
           total: result.total,
           page,
@@ -181,12 +191,12 @@ export class MoodController extends BaseController {
       
       const result = await this.services.databaseService.list<MoodEntry>('moods', queries);
       
-      // Calculate basic insights
-      const moods = result.documents;
-      const insights = this.calculateMoodInsights(moods);
+      // Transform and calculate basic insights
+      const transformedMoods = result.documents.map(mood => this.transformMoodToResponse(mood));
+      const insights = this.calculateMoodInsights(transformedMoods);
       
       this.logAction('mood_insights_calculated', user, { 
-        totalMoods: moods.length,
+        totalMoods: transformedMoods.length,
         trend: insights.trend,
         period 
       });
@@ -196,7 +206,7 @@ export class MoodController extends BaseController {
         period: {
           from: dateFrom.toISOString(),
           to: now.toISOString(),
-          totalEntries: moods.length,
+          totalEntries: transformedMoods.length,
         }
       });
       
@@ -226,24 +236,32 @@ export class MoodController extends BaseController {
       // Validate request body
       const validatedData = this.validateRequestBody(moodLogSchema, body);
       
-      // Update mood entry through database service
-      const updateData: Partial<MoodEntry> = {
-        mood: {
-          current: validatedData.current,
-          intensity: validatedData.intensity,
-          timestamp: new Date().toISOString(),
-          triggers: validatedData.triggers,
-          notes: validatedData.notes
-        },
-        updatedAt: new Date().toISOString()
+      // Update mood entry through database service (flattened for Appwrite)
+      const updateData: any = {
+        current: validatedData.current,
+        intensity: validatedData.intensity,
+        timestamp: validatedData.timestamp || new Date().toISOString(),
+        triggers: validatedData.triggers || [],
+        notes: validatedData.notes || '',
+        // Additional optional fields (only update if provided)
+        ...(validatedData.location !== undefined && { location: validatedData.location }),
+        ...(validatedData.weather !== undefined && { weather: validatedData.weather }),
+        ...(validatedData.activities !== undefined && { activities: validatedData.activities }),
+        ...(validatedData.sleepQuality !== undefined && { sleepQuality: validatedData.sleepQuality }),
+        ...(validatedData.stressLevel !== undefined && { stressLevel: validatedData.stressLevel }),
+        ...(validatedData.energyLevel !== undefined && { energyLevel: validatedData.energyLevel }),
+        ...(validatedData.socialInteraction !== undefined && { socialInteraction: validatedData.socialInteraction })
       };
       
-      const updatedMood = await this.services.databaseService.update<MoodEntry>('moods', id, updateData);
+      const updatedMood = await this.services.databaseService.update<any>('moods', id, updateData);
       
       this.logAction('mood_updated', user, { moodId: id });
       
+      // Transform flat data back to nested structure for API response
+      const transformedMood = this.transformMoodToResponse(updatedMood);
+      
       return this.success(
-        { mood: updatedMood }, 
+        { mood: transformedMood }, 
         SUCCESS_MESSAGES.MOOD_UPDATED
       );
       
@@ -384,11 +402,11 @@ export class MoodController extends BaseController {
       };
     }
 
-    // Calculate average intensity
+    // Calculate average intensity (work with nested structure)
     const totalIntensity = moods.reduce((sum, mood) => sum + mood.mood.intensity, 0);
     const averageIntensity = Math.round((totalIntensity / moods.length) * 10) / 10;
 
-    // Calculate mood distribution
+    // Calculate mood distribution (work with nested structure)
     const moodCounts = moods.reduce((counts, mood) => {
       counts[mood.mood.current] = (counts[mood.mood.current] || 0) + 1;
       return counts;
@@ -433,7 +451,8 @@ export class MoodController extends BaseController {
     const moodCounts: Record<string, number> = {};
     
     moods.forEach(mood => {
-      moodCounts[mood.mood.current] = (moodCounts[mood.mood.current] || 0) + 1;
+      const current = mood.mood.current || 'unknown';
+      moodCounts[current] = (moodCounts[current] || 0) + 1;
     });
     
     return moodCounts;
@@ -457,7 +476,7 @@ export class MoodController extends BaseController {
     const dailyMoods: Record<string, MoodEntry[]> = {};
     
     moods.forEach(mood => {
-      const date = new Date(mood.createdAt || mood.mood.timestamp).toISOString().split('T')[0];
+      const date = new Date(mood.$createdAt || mood.mood.timestamp).toISOString().split('T')[0];
       if (date) {
         if (!dailyMoods[date]) {
           dailyMoods[date] = [];
@@ -514,5 +533,34 @@ export class MoodController extends BaseController {
     }
 
     return recommendations;
+  }
+
+  /**
+   * Transform flattened mood data to nested response structure
+   */
+  private transformMoodToResponse(dbMood: any): MoodEntry {
+    return {
+      $id: dbMood.$id,
+      $createdAt: dbMood.$createdAt,
+      $updatedAt: dbMood.$updatedAt,
+      userId: dbMood.userId,
+      mood: {
+        current: dbMood.current,
+        intensity: dbMood.intensity,
+        timestamp: dbMood.timestamp,
+        triggers: dbMood.triggers || [],
+        notes: dbMood.notes || ''
+      },
+      // Extended mood data
+      location: dbMood.location,
+      weather: dbMood.weather,
+      activities: dbMood.activities || [],
+      sleepQuality: dbMood.sleepQuality,
+      stressLevel: dbMood.stressLevel,
+      energyLevel: dbMood.energyLevel,
+      socialInteraction: dbMood.socialInteraction,
+      createdAt: dbMood.$createdAt,
+      updatedAt: dbMood.$updatedAt
+    };
   }
 }

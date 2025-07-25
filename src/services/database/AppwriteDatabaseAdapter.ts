@@ -158,16 +158,18 @@ export class AppwriteDatabaseAdapter implements IDatabaseService {
       // If no results from primary field and we have more fields, try the secondary field
       if (result.documents.length === 0 && searchFields.length > 1) {
         const secondaryField = searchFields[1];
-        const secondaryResult = await this.databases.listDocuments(
-          config.appwrite.databaseId,
-          collectionId,
-          [Query.search(secondaryField, searchTerm)]
-        );
+        if (secondaryField) {
+          const secondaryResult = await this.databases.listDocuments(
+            config.appwrite.databaseId,
+            collectionId,
+            [Query.search(secondaryField, searchTerm)]
+          );
         
-        return {
-          documents: secondaryResult.documents as T[],
-          total: secondaryResult.total
-        };
+          return {
+            documents: secondaryResult.documents as T[],
+            total: secondaryResult.total
+          };
+        }
       }
 
       return {
