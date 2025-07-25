@@ -4,6 +4,8 @@ export interface User {
   email: string;
   name: string;
   avatar?: string;
+  emailVerified: boolean;
+  emailVerifiedAt?: string | null;
   subscription: {
     tier: 'free' | 'premium' | 'enterprise';
     validUntil?: string;
