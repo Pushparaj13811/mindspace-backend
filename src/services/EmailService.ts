@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { config } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
-import type { IEmailService } from '../interfaces/IEmailService.js';
+import type { IEmailService } from '../core/interfaces/IEmailService.js';
 
 export class EmailService implements IEmailService {
   private transporter: any;
