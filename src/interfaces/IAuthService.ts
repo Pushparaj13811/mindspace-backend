@@ -30,8 +30,8 @@ export interface IAuthService {
   deleteAccount(sessionId: string, password: string): Promise<void>;
   
   // Email verification
-  createEmailVerification(sessionId: string): Promise<void>;
-  confirmEmailVerification(userId: string, secret: string): Promise<void>;
+  createEmailVerification(token: string): Promise<void>;
+  confirmEmailVerification(verificationToken: string): Promise<{ userId: string; email: string }>;
   
   // OAuth2 methods
   createOAuth2Session(provider: string, successUrl?: string, failureUrl?: string): Promise<string>;
