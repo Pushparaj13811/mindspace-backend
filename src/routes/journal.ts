@@ -12,6 +12,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .post('/', withServices(async (services, context) => {
     // Require authentication and 'create_journal' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'create_journal');
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.createEntry(context);
@@ -26,7 +27,11 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
           t.Literal('anxious'),
           t.Literal('calm'),
           t.Literal('energetic'),
-          t.Literal('depressed')
+          t.Literal('depressed'),
+          t.Literal('excited'),
+          t.Literal('angry'),
+          t.Literal('peaceful'),
+          t.Literal('stressed')
         ]),
         intensity: t.Number({ minimum: 1, maximum: 10 }),
         timestamp: t.String(),
@@ -51,6 +56,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .get('/', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'view_own_data');
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.getEntries(context);
@@ -81,6 +87,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .get('/search', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'view_own_data');
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.searchEntries(context);
@@ -108,6 +115,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .get('/:id', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'view_own_data');
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.getEntry(context);
@@ -127,6 +135,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .put('/:id', withServices(async (services, context) => {
     // Require authentication and ownership of the journal entry
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.updateEntry(context);
@@ -144,7 +153,11 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
           t.Literal('anxious'),
           t.Literal('calm'),
           t.Literal('energetic'),
-          t.Literal('depressed')
+          t.Literal('depressed'),
+          t.Literal('excited'),
+          t.Literal('angry'),
+          t.Literal('peaceful'),
+          t.Literal('stressed')
         ]),
         intensity: t.Number({ minimum: 1, maximum: 10 }),
         timestamp: t.String(),
@@ -165,6 +178,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .delete('/:id', withServices(async (services, context) => {
     // Require authentication and ownership of the journal entry
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.deleteEntry(context);
@@ -184,6 +198,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .get('/admin/all', withServices(async (services, context) => {
     // Require company admin or super admin role
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN', 'COMPANY_ADMIN']);
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.getAllEntriesAdmin(context);
@@ -214,6 +229,7 @@ export const journalRoutes = new Elysia({ prefix: '/journal' })
   .get('/analytics', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' or 'view_company_data' permission
     const user = await authMiddleware().requireAuthWithAnyPermission(context, ['view_own_data', 'view_company_data']);
+    context.user = user;
     
     const controller = new JournalController(services);
     return await controller.getJournalAnalytics(context);

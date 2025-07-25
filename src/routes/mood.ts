@@ -12,6 +12,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .post('/', withServices(async (services, context) => {
     // Require authentication and 'create_journal' permission (mood entries are related to journaling)
     const user = await authMiddleware().requireAuthWithPermission(context, 'create_journal');
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.logMood(context);
@@ -52,6 +53,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .get('/', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'view_own_data');
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.getMoodHistory(context);
@@ -86,6 +88,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .get('/insights', withServices(async (services, context) => {
     // Require authentication and 'view_own_data' permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'view_own_data');
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.getMoodInsights(context);
@@ -111,6 +114,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .put('/:id', withServices(async (services, context) => {
     // Require authentication - ownership will be checked in controller
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.updateMood(context);
@@ -153,6 +157,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .delete('/:id', withServices(async (services, context) => {
     // Require authentication - ownership will be checked in controller
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.deleteMood(context);
@@ -172,6 +177,7 @@ export const moodRoutes = new Elysia({ prefix: '/mood' })
   .get('/admin/analytics', withServices(async (services, context) => {
     // Require company admin or super admin role
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN', 'COMPANY_ADMIN']);
+    context.user = user;
     
     const controller = new MoodController(services);
     return await controller.getMoodAnalyticsAdmin(context);
