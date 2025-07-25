@@ -329,21 +329,57 @@ export class AppwriteAuthService implements IAuthService {
     }
   }
 
-  async getCurrentUser(sessionId: string): Promise<User> {
+  async getCurrentUser(token: string): Promise<User> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      logger.info('Getting current user with token', { 
+        tokenLength: token.length,
+        tokenType: token.includes('.') ? 'JWT' : 'SessionID' 
+      });
 
-      const sessionAccount = new Account(sessionClient);
-      const userAccount = await sessionAccount.get();
+      let userId: string;
+
+      // Check if token is a JWT or session ID
+      if (token.includes('.')) {
+        // Extract user ID from JWT token
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in getCurrentUser', { error: decodeError });
+          throw new Error('Invalid JWT token');
+        }
+      } else {
+        // For session ID, get user ID via session validation
+        const sessions = await this.account.listSessions();
+        const validSession = sessions.sessions.find((s: any) => s.$id === token);
+        
+        if (!validSession) {
+          throw new Error('Session not found');
+        }
+        
+        userId = validSession.userId;
+        logger.info('Extracted user ID from session', { userId });
+      }
+
+      // Get user data using admin Users API (no scope issues)
+      const userAccount = await this.users.get(userId);
+      
+      logger.info('User data retrieved successfully', { 
+        userId: userAccount.$id,
+        email: userAccount.email 
+      });
 
       return await this.transformAppwriteUser(userAccount);
     } catch (error) {
       logger.error('Failed to get current user', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        sessionId
+        tokenPrefix: token.substring(0, 20)
       });
 
       throw new Error('Failed to get user information');
