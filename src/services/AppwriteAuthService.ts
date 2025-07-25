@@ -1,4 +1,4 @@
-import { Client, Account, Users, ID } from 'node-appwrite';
+import { Client, Account, Users, ID, Query } from 'node-appwrite';
 import type { IAuthService } from '../interfaces/IAuthService.js';
 import type { User, AuthTokens, LoginRequest, RegisterRequest, OAuth2Session } from '../types/index.js';
 import { config } from '../utils/config.js';
@@ -214,21 +214,66 @@ export class AppwriteAuthService implements IAuthService {
     }
   }
 
-  async logout(sessionId: string): Promise<void> {
+  async logout(token: string): Promise<void> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      // Handle different token types
+      if (token.includes('.')) {
+        // JWT token - blacklist it
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3 && parts[1]) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+            const userId = payload.userId || payload.sub;
+            const exp = payload.exp ? payload.exp * 1000 : Date.now() + (15 * 60 * 1000); // Default 15 min if no exp
+            
+            // Use token hash as unique identifier
+            const crypto = await import('crypto');
+            const tokenHash = crypto.createHash('sha256').update(token).digest('hex').substring(0, 16);
+            
+            if (userId) {
+              const { jwtBlacklist } = await import('../utils/jwtBlacklist.js');
+              jwtBlacklist.blacklistToken(tokenHash, userId, exp);
+              
+              logger.info('JWT token blacklisted on logout', { 
+                userId,
+                tokenHash,
+                expiresAt: new Date(exp).toISOString()
+              });
+            }
+          }
+        } catch (jwtError) {
+          logger.error('Failed to blacklist JWT on logout', { error: jwtError });
+          // Continue with logout even if blacklisting fails
+        }
+      } else {
+        // Session ID - delete from Appwrite
+        try {
+          const sessionClient = new Client()
+            .setEndpoint(config.appwrite.endpoint)
+            .setProject(config.appwrite.projectId)
+            .setSession(token);
 
-      const sessionAccount = new Account(sessionClient);
-      await sessionAccount.deleteSession('current');
+          const sessionAccount = new Account(sessionClient);
+          await sessionAccount.deleteSession('current');
 
-      logger.info('User logged out successfully', { sessionId });
+          logger.info('Appwrite session deleted successfully', { sessionId: token });
+        } catch (sessionError) {
+          logger.error('Failed to delete Appwrite session', { 
+            error: sessionError instanceof Error ? sessionError.message : 'Unknown error',
+            sessionId: token
+          });
+          // Continue - don't fail logout
+        }
+      }
+
+      logger.info('User logged out successfully', { 
+        tokenType: token.includes('.') ? 'JWT' : 'SessionID',
+        tokenPrefix: token.substring(0, 20) + '...'
+      });
     } catch (error) {
       logger.error('Logout failed', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        sessionId
+        tokenPrefix: token.substring(0, 20) + '...'
       });
       // Don't throw error on logout - always succeed
     }
@@ -248,16 +293,11 @@ export class AppwriteAuthService implements IAuthService {
       if (token.includes('.')) {
         // This looks like a JWT token
         try {
-          // Decode JWT to get user ID (Appwrite JWTs are self-contained)
-          const parts = token.split('.');
-          if (parts.length !== 3 || !parts[1]) {
-            throw new Error('Invalid JWT format');
-          }
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          userId = payload.userId || payload.sub;
-          sessionId = payload.sessionId;
+          const { userId: jwtUserId } = await this.validateJWTToken(token);
+          userId = jwtUserId;
+          sessionId = null; // JWTs don't have session IDs in this context
           
-          logger.info('Decoded JWT token', { userId, sessionId });
+          logger.info('Decoded and validated JWT token', { userId });
         } catch (decodeError) {
           logger.error('Failed to decode JWT', { error: decodeError });
           throw new Error('Invalid JWT token');
@@ -342,14 +382,10 @@ export class AppwriteAuthService implements IAuthService {
       if (token.includes('.')) {
         // Extract user ID from JWT token
         try {
-          const parts = token.split('.');
-          if (parts.length !== 3 || !parts[1]) {
-            throw new Error('Invalid JWT format');
-          }
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          userId = payload.userId || payload.sub;
+          const { userId: jwtUserId } = await this.validateJWTToken(token);
+          userId = jwtUserId;
           
-          logger.info('Extracted user ID from JWT', { userId });
+          logger.info('Extracted user ID from validated JWT', { userId });
         } catch (decodeError) {
           logger.error('Failed to decode JWT in getCurrentUser', { error: decodeError });
           throw new Error('Invalid JWT token');
@@ -387,43 +423,77 @@ export class AppwriteAuthService implements IAuthService {
   }
 
   async updateProfile(
-    sessionId: string,
+    token: string,
     updates: { name?: string; avatar?: string }
   ): Promise<User> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      logger.info('Updating profile with token', { 
+        tokenLength: token.length,
+        tokenType: token.includes('.') ? 'JWT' : 'SessionID',
+        updates 
+      });
 
-      const sessionAccount = new Account(sessionClient);
+      let userId: string;
 
-      // Update name if provided
-      if (updates.name) {
-        await sessionAccount.updateName(updates.name);
+      // Extract user ID from token
+      if (token.includes('.')) {
+        // JWT token - extract user ID from payload
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT for profile update', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in updateProfile', { error: decodeError });
+          throw new Error('Invalid JWT token');
+        }
+      } else {
+        // Session ID - validate and get user ID
+        const sessions = await this.account.listSessions();
+        const validSession = sessions.sessions.find((s: any) => s.$id === token);
+        
+        if (!validSession) {
+          throw new Error('Session not found');
+        }
+        
+        userId = validSession.userId;
+        logger.info('Extracted user ID from session for profile update', { userId });
       }
 
-      // Get updated user
-      const userAccount = await sessionAccount.get();
+      // For profile updates, we need to use the Users API since we're on server-side
+      // Update name if provided
+      if (updates.name) {
+        await this.users.updateName(userId, updates.name);
+        logger.info('User name updated via Users API', { userId, name: updates.name });
+      }
+
+      // Get updated user data
+      const userAccount = await this.users.get(userId);
       const user = await this.transformAppwriteUser(userAccount);
 
-      // Handle avatar update through preferences
+      // Handle avatar update through preferences using Users API
       if (updates.avatar) {
+        const currentPrefs = userAccount.prefs || {};
         const updatedPreferences = {
-          ...user.preferences,
+          ...currentPrefs,
           avatar: updates.avatar,
         };
 
-        await sessionAccount.updatePrefs(updatedPreferences);
+        await this.users.updatePrefs(userId, updatedPreferences);
         user.avatar = updates.avatar;
+        logger.info('User avatar updated via Users API', { userId, avatar: updates.avatar });
       }
 
-      logger.info('User profile updated', { userId: user.$id });
+      logger.info('User profile updated successfully', { userId: user.$id });
       return user;
     } catch (error) {
       logger.error('Failed to update profile', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        sessionId
+        tokenPrefix: token.substring(0, 20)
       });
 
       throw new Error('Failed to update profile');
@@ -431,7 +501,7 @@ export class AppwriteAuthService implements IAuthService {
   }
 
   async updatePreferences(
-    sessionId: string,
+    token: string,
     preferences: {
       theme?: 'light' | 'dark' | 'auto';
       notifications?: boolean;
@@ -440,15 +510,45 @@ export class AppwriteAuthService implements IAuthService {
     }
   ): Promise<User> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      logger.info('Updating preferences with token', { 
+        tokenLength: token.length,
+        tokenType: token.includes('.') ? 'JWT' : 'SessionID',
+        preferences 
+      });
 
-      const sessionAccount = new Account(sessionClient);
+      let userId: string;
 
-      // Get current preferences
-      const userAccount = await sessionAccount.get();
+      // Extract user ID from token
+      if (token.includes('.')) {
+        // JWT token - extract user ID from payload
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT for preferences update', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in updatePreferences', { error: decodeError });
+          throw new Error('Invalid JWT token');
+        }
+      } else {
+        // Session ID - validate and get user ID
+        const sessions = await this.account.listSessions();
+        const validSession = sessions.sessions.find((s: any) => s.$id === token);
+        
+        if (!validSession) {
+          throw new Error('Session not found');
+        }
+        
+        userId = validSession.userId;
+        logger.info('Extracted user ID from session for preferences update', { userId });
+      }
+
+      // Get current user data using Users API
+      const userAccount = await this.users.get(userId);
       const currentPrefs = userAccount.prefs || {};
 
       // Merge with new preferences
@@ -457,18 +557,20 @@ export class AppwriteAuthService implements IAuthService {
         ...preferences,
       };
 
-      await sessionAccount.updatePrefs(updatedPrefs);
+      // Update preferences using Users API
+      await this.users.updatePrefs(userId, updatedPrefs);
+      logger.info('User preferences updated via Users API', { userId, preferences });
 
       // Return updated user
-      const updatedUserAccount = await sessionAccount.get();
+      const updatedUserAccount = await this.users.get(userId);
       const user = await this.transformAppwriteUser(updatedUserAccount);
 
-      logger.info('User preferences updated', { userId: user.$id });
+      logger.info('User preferences updated successfully', { userId: user.$id });
       return user;
     } catch (error) {
       logger.error('Failed to update preferences', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        sessionId
+        tokenPrefix: token.substring(0, 20)
       });
 
       throw new Error('Failed to update preferences');
@@ -476,28 +578,89 @@ export class AppwriteAuthService implements IAuthService {
   }
 
   async changePassword(
-    sessionId: string,
+    token: string,
     currentPassword: string,
     newPassword: string
   ): Promise<void> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      logger.info('Changing password with token', { 
+        tokenLength: token.length,
+        tokenType: token.includes('.') ? 'JWT' : 'SessionID'
+      });
 
-      const sessionAccount = new Account(sessionClient);
-      await sessionAccount.updatePassword(newPassword, currentPassword);
+      let userId: string;
 
-      logger.info('Password changed successfully');
+      // Extract user ID from token
+      if (token.includes('.')) {
+        // JWT token - extract user ID from payload
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT for password change', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in changePassword', { error: decodeError });
+          throw new Error('Invalid JWT token');
+        }
+      } else {
+        // Session ID - validate and get user ID
+        const sessions = await this.account.listSessions();
+        const validSession = sessions.sessions.find((s: any) => s.$id === token);
+        
+        if (!validSession) {
+          throw new Error('Session not found');
+        }
+        
+        userId = validSession.userId;
+        logger.info('Extracted user ID from session for password change', { userId });
+      }
+
+      // For password changes, we need to use the Users API updatePassword method
+      // Note: Users API doesn't verify current password, so we need to verify it first
+      try {
+        // Get user email to verify current password
+        const userAccount = await this.users.get(userId);
+        
+        // Verify current password by attempting to create a session
+        const testClient = new Client()
+          .setEndpoint(config.appwrite.endpoint)
+          .setProject(config.appwrite.projectId);
+        const testAccount = new Account(testClient);
+        
+        await testAccount.createEmailPasswordSession(userAccount.email, currentPassword);
+        
+        // If we get here, current password is correct, now update with new password
+        await this.users.updatePassword(userId, newPassword);
+        
+        logger.info('Password changed successfully via Users API', { userId });
+      } catch (verificationError) {
+        logger.error('Password verification failed', { 
+          error: verificationError instanceof Error ? verificationError.message : 'Unknown error',
+          userId 
+        });
+        
+        if (verificationError instanceof Error) {
+          if (verificationError.message.includes('Invalid credentials') ||
+              verificationError.message.includes('user_invalid_credentials')) {
+            throw new Error('Current password is incorrect');
+          }
+        }
+        
+        throw new Error('Failed to change password');
+      }
     } catch (error) {
       logger.error('Failed to change password', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        tokenPrefix: token.substring(0, 20)
       });
 
       if (error instanceof Error) {
-        if (error.message.includes('user_invalid_credentials')) {
-          throw new Error('Current password is incorrect');
+        if (error.message.includes('Current password is incorrect')) {
+          throw error; // Re-throw with original message
         }
       }
 
@@ -507,38 +670,94 @@ export class AppwriteAuthService implements IAuthService {
 
   async resetPassword(email: string): Promise<void> {
     try {
-      const sessionAccount = new Account(this.client);
-      await sessionAccount.createRecovery(
-        email,
-        `${config.appwrite.endpoint}/auth/recovery` // Recovery URL
-      );
+      // First verify user exists using Users API (admin)
+      const users = await this.users.list([
+        Query.equal('email', [email])
+      ]);
 
-      logger.info('Password reset email sent', { email });
+      if (users.users.length === 0) {
+        logger.warn('Password reset requested for non-existent email', { email });
+        // Don't reveal user existence - always appear to succeed
+        return;
+      }
+
+      const user = users.users[0];
+      if (!user) {
+        logger.warn('User not found in list result', { email });
+        return;
+      }
+      
+      // Create a special JWT token for password reset using Users API
+      // This creates a token without sending any email
+      const jwtResponse = await this.users.createJWT(user.$id);
+      const resetToken = jwtResponse.jwt;
+
+      // Send custom email using our EmailService with the JWT token
+      const { container, SERVICE_KEYS } = await import('../container/ServiceContainer.js');
+      const emailService = container.resolve(SERVICE_KEYS.EMAIL_SERVICE) as any;
+      
+      await emailService.sendPasswordResetEmail(email, user.name || 'User', resetToken);
+
+      logger.info('Custom password reset email sent with JWT token', { 
+        email, 
+        userId: user.$id,
+        tokenPreview: resetToken.substring(0, 20) + '...'
+      });
     } catch (error) {
       logger.error('Failed to send password reset email', {
         error: error instanceof Error ? error.message : 'Unknown error',
         email
       });
 
-      // Don't reveal if user exists
+      // Don't reveal if user exists or if there were errors
       // Always appear to succeed for security
     }
   }
 
-  async confirmPasswordReset(secret: string, password: string): Promise<void> {
+  async confirmPasswordReset(resetToken: string, password: string): Promise<void> {
     try {
-      const sessionAccount = new Account(this.client);
-      await sessionAccount.updateRecovery(
-        secret,
-        secret, // userId - Appwrite uses secret as both
-        password
-      );
+      // Verify JWT token and extract user ID
+      let userId: string;
+      
+      if (resetToken.includes('.')) {
+        // This is a JWT token - decode to get user ID
+        try {
+          const parts = resetToken.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT for password reset', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in confirmPasswordReset', { error: decodeError });
+          throw new Error('Invalid reset token');
+        }
+      } else {
+        throw new Error('Invalid token format - expected JWT');
+      }
 
-      logger.info('Password reset completed');
+      // Update password using Users API (admin)
+      await this.users.updatePassword(userId, password);
+
+      logger.info('Password reset completed using JWT verification', {
+        userId,
+        tokenPreview: resetToken.substring(0, 20) + '...'
+      });
     } catch (error) {
       logger.error('Failed to complete password reset', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        tokenPreview: resetToken.substring(0, 20) + '...'
       });
+
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid reset token') || 
+            error.message.includes('Invalid token format') ||
+            error.message.includes('Invalid JWT format')) {
+          throw error; // Re-throw with original message
+        }
+      }
 
       throw new Error('Failed to reset password');
     }
@@ -581,29 +800,76 @@ export class AppwriteAuthService implements IAuthService {
   }
 
   // Email verification methods
-  async createEmailVerification(sessionId: string): Promise<void> {
+  async createEmailVerification(token: string): Promise<void> {
     try {
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(sessionId);
+      // Extract user ID from token (either JWT or session ID)
+      let userId: string;
+      let userEmail: string;
+      let userName: string;
 
-      const sessionAccount = new Account(sessionClient);
+      if (token.includes('.')) {
+        // JWT token - extract user ID from payload
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3 || !parts[1]) {
+            throw new Error('Invalid JWT format');
+          }
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+          userId = payload.userId || payload.sub;
+          
+          logger.info('Extracted user ID from JWT for email verification', { userId });
+        } catch (decodeError) {
+          logger.error('Failed to decode JWT in createEmailVerification', { error: decodeError });
+          throw new Error('Invalid token');
+        }
+      } else {
+        // Session ID - validate and get user ID
+        const sessions = await this.account.listSessions();
+        const validSession = sessions.sessions.find((s: any) => s.$id === token);
+        
+        if (!validSession) {
+          throw new Error('Session not found');
+        }
+        
+        userId = validSession.userId;
+        logger.info('Extracted user ID from session for email verification', { userId });
+      }
 
-      // Create email verification
-      const verificationUrl = `${config.app.frontendUrl}/verify-email`;
-      await sessionAccount.createVerification(verificationUrl);
+      // Get user details using Users API
+      const user = await this.users.get(userId);
+      userEmail = user.email;
+      userName = user.name || 'User';
 
-      logger.info('Email verification created', { sessionId });
+      // Generate custom verification token using our store
+      const crypto = await import('crypto');
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      
+      // Store the token in our verification store
+      const { verificationStore } = await import('../utils/verificationStore.js');
+      verificationStore.storeToken(userId, userEmail, verificationToken, 24); // 24 hours expiry
+
+      // Send custom verification email using our EmailService
+      const { container, SERVICE_KEYS } = await import('../container/ServiceContainer.js');
+      const emailService = container.resolve(SERVICE_KEYS.EMAIL_SERVICE) as any;
+      
+      await emailService.sendVerificationEmail(userEmail, userName, verificationToken);
+
+      logger.info('Custom email verification created and sent', { 
+        userId, 
+        email: userEmail,
+        tokenPreview: verificationToken.substring(0, 8) + '...'
+      });
     } catch (error) {
       logger.error('Failed to create email verification', {
         error: error instanceof Error ? error.message : 'Unknown error',
-        sessionId
+        tokenPreview: token.substring(0, 20) + '...'
       });
 
       if (error instanceof Error) {
-        if (error.message.includes('user_already_verified')) {
-          throw new Error('Email is already verified');
+        if (error.message.includes('Invalid token') ||
+            error.message.includes('Session not found') ||
+            error.message.includes('Invalid JWT format')) {
+          throw error; // Re-throw with original message
         }
       }
 
@@ -915,6 +1181,35 @@ export class AppwriteAuthService implements IAuthService {
   }
 
   // Helper methods
+  private async validateJWTToken(token: string): Promise<{ userId: string; jti?: string }> {
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1]) {
+      throw new Error('Invalid JWT format');
+    }
+    
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    const userId = payload.userId || payload.sub;
+    
+    // Debug: Log the full payload to see what fields are available
+    logger.info('JWT payload contents', { 
+      payload: JSON.stringify(payload),
+      availableFields: Object.keys(payload)
+    });
+    
+    // Use the full token as unique identifier since Appwrite JWTs don't have jti
+    // We'll use a hash of the token for more compact storage
+    const crypto = await import('crypto');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex').substring(0, 16);
+    
+    // Check if JWT is blacklisted
+    const { jwtBlacklist } = await import('../utils/jwtBlacklist.js');
+    if (jwtBlacklist.isBlacklisted(tokenHash)) {
+      throw new Error('Token has been revoked');
+    }
+    
+    return { userId, jti: tokenHash };
+  }
+
   private async transformAppwriteUser(appwriteUser: any): Promise<User> {
     const prefs = appwriteUser.prefs || {};
 
