@@ -417,6 +417,51 @@ export class AuthController extends BaseController {
   }
 
   /**
+   * Confirm password reset
+   */
+  async confirmPasswordReset(context: { body: unknown; set: any }) {
+    const { body, set } = context;
+    
+    try {
+      this.logAction('confirm_password_reset_attempt');
+      
+      const { token, password } = body as { token: string; password: string };
+      
+      if (!token || !password) {
+        throw new Error('Validation error: Token and password are required');
+      }
+      
+      if (password.length < 8) {
+        throw new Error('Validation error: Password must be at least 8 characters long');
+      }
+      
+      // Confirm password reset through service
+      await this.services.authService.confirmPasswordReset(token, password);
+      
+      this.logAction('confirm_password_reset_success');
+      
+      return this.success(
+        { message: 'Password reset successfully' }
+      );
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Validation error')) {
+          return this.handleValidationError(error, set);
+        }
+        if (error.message.includes('Invalid or expired reset token') ||
+            error.message.includes('Invalid reset token') ||
+            error.message.includes('Invalid token format')) {
+          set.status = HTTP_STATUS.BAD_REQUEST;
+          return this.error('Invalid or expired reset token', HTTP_STATUS.BAD_REQUEST);
+        }
+      }
+      
+      return this.handleBusinessError(error as Error, set);
+    }
+  }
+
+  /**
    * Initiate OAuth2 authentication flow
    */
   async initiateOAuth2(context: { body: unknown; set: any }) {

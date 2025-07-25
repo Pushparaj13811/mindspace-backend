@@ -156,6 +156,23 @@ export const authRoutes = new Elysia()
     },
   })
 
+  // Confirm password reset
+  .post('/confirm-password-reset', withServices(async (services, context) => {
+    const controller = new AuthController(services);
+    return await controller.confirmPasswordReset(context);
+  }), {
+    beforeHandle: rateLimitMiddleware,
+    body: t.Object({
+      token: t.String({ minLength: 1, description: 'Reset token from the password reset email' }),
+      password: t.String({ minLength: 8, description: 'New password for the account' }),
+    }),
+    detail: {
+      tags: ['Auth'],
+      summary: 'Confirm password reset',
+      description: 'Resets user password using the token from the reset email',
+    },
+  })
+
   // Resend email verification
   .post('/resend-verification', withServices(async (services, context) => {
     const controller = new AuthController(services);
