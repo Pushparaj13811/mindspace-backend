@@ -1,4 +1,37 @@
 // Core type definitions for MindSpace Backend
+
+// Role and Permission System
+export type UserRole = 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'COMPANY_MANAGER' | 'COMPANY_USER' | 'INDIVIDUAL_USER';
+
+export type Permission = 
+  // Platform permissions
+  'manage_platform' | 'view_platform_analytics' | 'manage_companies' | 'manage_super_admins' |
+  // Company permissions  
+  'manage_company' | 'view_company_analytics' | 'manage_company_users' | 'manage_departments' |
+  // User permissions
+  'manage_profile' | 'create_journal' | 'view_own_data' | 'delete_account' | 'view_company_data';
+
+export interface Company {
+  $id: string;
+  name: string;
+  domain: string; // email domain for auto-assignment
+  logo?: string;
+  adminId: string; // Company admin user ID
+  settings: {
+    allowSelfRegistration: boolean;
+    requireEmailVerification: boolean;
+    dataRetentionDays: number;
+  };
+  subscription: {
+    tier: 'free' | 'premium' | 'enterprise';
+    validUntil?: string;
+    maxUsers: number;
+    currentUsers: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface User {
   $id: string;
   email: string;
@@ -6,16 +39,28 @@ export interface User {
   avatar?: string;
   emailVerified: boolean;
   emailVerifiedAt?: string | null;
+  
+  // Role and Company Association
+  role: UserRole;
+  companyId?: string; // null for INDIVIDUAL_USER and SUPER_ADMIN
+  permissions: Permission[];
+  
+  // Legacy subscription (for individual users)
   subscription: {
     tier: 'free' | 'premium' | 'enterprise';
     validUntil?: string;
   };
+  
   preferences: {
     theme: 'light' | 'dark' | 'auto';
     notifications: boolean;
     preferredAIModel: string;
     language: string;
   };
+  
+  // Metadata
+  lastLogin?: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -184,6 +229,7 @@ export interface Config {
     databaseId: string;
     collections: {
       users: string;
+      companies: string;
       journals: string;
       moods: string;
       notifications: string;
@@ -220,5 +266,63 @@ export interface Config {
   };
   app: {
     frontendUrl: string;
+  };
+}
+
+// Company Management Types
+export interface CreateCompanyRequest {
+  name: string;
+  domain: string;
+  settings?: {
+    allowSelfRegistration?: boolean;
+    requireEmailVerification?: boolean;
+    dataRetentionDays?: number;
+  };
+}
+
+export interface UpdateCompanyRequest {
+  name?: string;
+  domain?: string;
+  logo?: string;
+  settings?: {
+    allowSelfRegistration?: boolean;
+    requireEmailVerification?: boolean;
+    dataRetentionDays?: number;
+  };
+}
+
+export interface CompanyUserInvite {
+  email: string;
+  role: 'COMPANY_ADMIN' | 'COMPANY_MANAGER' | 'COMPANY_USER';
+  name?: string;
+}
+
+export interface CompanyAnalytics {
+  totalUsers: number;
+  activeUsers: number;
+  newUsersThisMonth: number;
+  journalEntries: number;
+  moodLogs: number;
+  subscriptionTier: string;
+  usageMetrics: {
+    dailyActiveUsers: number[];
+    weeklyJournalEntries: number[];
+    monthlyMoodLogs: number[];
+  };
+}
+
+export interface PlatformAnalytics {
+  totalUsers: number;
+  totalCompanies: number;
+  activeCompanies: number;
+  subscriptionDistribution: {
+    free: number;
+    premium: number;
+    enterprise: number;
+  };
+  revenueMetrics: {
+    monthlyRecurringRevenue: number;
+    totalRevenue: number;
+    averageRevenuePerUser: number;
   };
 }
