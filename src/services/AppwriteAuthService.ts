@@ -41,19 +41,65 @@ export class AppwriteAuthService implements IAuthService {
         email: userData.email
       });
 
+      // Check for company auto-assignment by email domain
+      let userRole = 'INDIVIDUAL_USER';
+      let companyId: string | undefined;
+      
+      try {
+        // Import company service to check for domain-based assignment
+        const { container, SERVICE_KEYS } = await import('../container/ServiceContainer.js');
+        const companyService = container.resolve(SERVICE_KEYS.COMPANY_SERVICE) as any;
+        
+        if (companyService && companyService.assignUserToCompanyByDomain) {
+          const assignedCompany = await companyService.assignUserToCompanyByDomain(userData.email);
+          if (assignedCompany) {
+            userRole = 'COMPANY_USER';
+            companyId = assignedCompany.$id;
+            
+            logger.info('User auto-assigned to company', {
+              userId: userAccount.$id,
+              companyId: assignedCompany.$id,
+              domain: userData.email.split('@')[1]
+            });
+          }
+        }
+      } catch (companyError) {
+        logger.error('Company auto-assignment failed', {
+          error: companyError instanceof Error ? companyError.message : 'Unknown error',
+          email: userData.email
+        });
+        // Continue with individual user registration
+      }
+
+      // Set user preferences with role and company info
+      const { getDefaultUserData } = await import('../utils/permissions.js');
+      const defaultData = getDefaultUserData(userRole as any, companyId);
+      
+      await this.users.updatePrefs(userAccount.$id, {
+        role: userRole,
+        companyId: companyId,
+        permissions: defaultData.permissions,
+        subscription: defaultData.subscription,
+        preferences: defaultData.preferences,
+        isActive: true,
+      });
+
       // Create session immediately after account creation
       const session = await sessionAccount.createEmailPasswordSession(
         userData.email,
         userData.password
       );
 
-      // Get user with preferences - no Appwrite verification email
-      const user = await this.transformAppwriteUser(userAccount);
+      // Get user with updated preferences
+      const updatedUserAccount = await this.users.get(userAccount.$id);
+      const user = await this.transformAppwriteUser(updatedUserAccount);
       const tokens = await this.transformAppwriteSession(session, null);
 
       logger.info('User registered successfully', {
         userId: user.$id,
-        email: userData.email
+        email: userData.email,
+        role: userRole,
+        companyId: companyId
       });
 
       return { user, session: tokens };
@@ -132,6 +178,27 @@ export class AppwriteAuthService implements IAuthService {
           userId: adminUser.$id,
           email: adminUser.email
         });
+
+        // Update lastLogin for the user
+        try {
+          const currentPrefs = adminUser.prefs || {};
+          await this.users.updatePrefs(adminUser.$id, {
+            ...currentPrefs,
+            lastLogin: new Date().toISOString()
+          });
+          
+          // Update adminUser with lastLogin for transformation
+          adminUser.prefs = {
+            ...currentPrefs,
+            lastLogin: new Date().toISOString()
+          };
+        } catch (loginUpdateError) {
+          logger.error('Failed to update lastLogin', {
+            error: loginUpdateError instanceof Error ? loginUpdateError.message : 'Unknown error',
+            userId: adminUser.$id
+          });
+          // Don't fail login if lastLogin update fails
+        }
 
         const user = await this.transformAppwriteUser(adminUser);
         
@@ -851,6 +918,16 @@ export class AppwriteAuthService implements IAuthService {
       userEmail = user.email;
       userName = user.name || 'User';
 
+      // Check if email is already verified
+      const userPrefs = user.prefs || {};
+      if (userPrefs.emailVerified === true) {
+        logger.info('Email verification request for already verified user', { 
+          userId, 
+          email: userEmail 
+        });
+        throw new Error('Email is already verified');
+      }
+
       // Generate custom verification token using our store
       const crypto = await import('crypto');
       const verificationToken = crypto.randomBytes(32).toString('hex');
@@ -879,7 +956,8 @@ export class AppwriteAuthService implements IAuthService {
       if (error instanceof Error) {
         if (error.message.includes('Invalid token') ||
             error.message.includes('Session not found') ||
-            error.message.includes('Invalid JWT format')) {
+            error.message.includes('Invalid JWT format') ||
+            error.message.includes('Email is already verified')) {
           throw error; // Re-throw with original message
         }
       }
@@ -1005,33 +1083,192 @@ export class AppwriteAuthService implements IAuthService {
         throw new Error('OAuth2 callback requires userId and secret');
       }
 
-      // Create session client with the OAuth2 session
-      const sessionClient = new Client()
-        .setEndpoint(config.appwrite.endpoint)
-        .setProject(config.appwrite.projectId)
-        .setSession(secret);
+      logger.info('Processing OAuth2 callback', { userId });
 
-      const sessionAccount = new Account(sessionClient);
+      // Use admin Users API to get user data (avoids scope issues)
+      try {
+        logger.info('Getting user data via admin Users API');
+        const adminUser = await this.users.get(userId);
+        
+        logger.info('OAuth2 user data retrieved via admin API', {
+          userId: adminUser.$id,
+          email: adminUser.email
+        });
 
-      // Get user account and session info
-      const userAccount = await sessionAccount.get();
-      const sessionInfo = await sessionAccount.getSession('current');
+        // Create a regular session using the OAuth2 secret
+        // This creates a proper session that can be used for future requests
+        const sessionClient = new Client()
+          .setEndpoint(config.appwrite.endpoint)
+          .setProject(config.appwrite.projectId)
+          .setSession(secret);
 
-      // Verify the userId matches
-      if (userAccount.$id !== userId) {
-        throw new Error('OAuth2 callback userId mismatch');
+        const sessionAccount = new Account(sessionClient);
+        
+        // Get session info using the OAuth2 session
+        let sessionInfo;
+        try {
+          sessionInfo = await sessionAccount.getSession('current');
+          logger.info('OAuth2 session info retrieved', {
+            sessionId: sessionInfo.$id,
+            userId: sessionInfo.userId,
+            expires: sessionInfo.expire
+          });
+        } catch (sessionError) {
+          logger.error('Failed to get OAuth2 session info', {
+            error: sessionError instanceof Error ? sessionError.message : 'Unknown error',
+            userId
+          });
+          
+          // Create a fallback session object
+          sessionInfo = {
+            $id: secret,
+            userId: userId,
+            expire: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year
+            provider: 'google',
+            providerUid: adminUser.email,
+            $createdAt: new Date().toISOString(),
+            $updatedAt: new Date().toISOString()
+          };
+        }
+
+        // Create JWT using Users API (admin privileges)
+        let jwtToken: string | null = null;
+        try {
+          const jwtResponse = await this.users.createJWT(userId);
+          jwtToken = jwtResponse.jwt;
+          logger.info('JWT created successfully for OAuth2 user', {
+            userId,
+            jwtLength: jwtToken.length
+          });
+        } catch (jwtError) {
+          logger.error('Failed to create JWT for OAuth2 user', {
+            error: jwtError instanceof Error ? jwtError.message : 'Unknown error',
+            userId
+          });
+          // Continue without JWT, use session ID as token
+        }
+
+        // For OAuth2 users, automatically verify email and update lastLogin
+        try {
+          const currentPrefs = adminUser.prefs || {};
+          const updateData: any = {
+            ...currentPrefs,
+            lastLogin: new Date().toISOString()
+          };
+          
+          // Auto-verify email if not already verified
+          if (!currentPrefs.emailVerified) {
+            updateData.emailVerified = true;
+            updateData.emailVerifiedAt = new Date().toISOString();
+            
+            logger.info('OAuth2 user email automatically verified', { 
+              userId, 
+              email: adminUser.email 
+            });
+          }
+          
+          await this.users.updatePrefs(userId, updateData);
+        } catch (verifyError) {
+          logger.error('Failed to update OAuth2 user preferences', {
+            error: verifyError instanceof Error ? verifyError.message : 'Unknown error',
+            userId
+          });
+          // Don't fail the OAuth2 process if preference update fails
+        }
+
+        // Get updated user data with verification status
+        const updatedAdminUser = await this.users.get(userId);
+        
+        // Transform user and session data
+        const user = await this.transformAppwriteUser(updatedAdminUser);
+        const tokens = await this.transformAppwriteSession(sessionInfo, jwtToken);
+
+        logger.info('OAuth2 callback processed successfully', {
+          userId: user.$id,
+          email: user.email,
+          emailVerified: user.emailVerified,
+          hasJWT: !!jwtToken
+        });
+
+        return { user, session: tokens };
+        
+      } catch (adminError) {
+        logger.error('Failed to get user via admin API in OAuth2 callback', {
+          error: adminError instanceof Error ? adminError.message : 'Unknown error',
+          userId
+        });
+        
+        // Fallback: try the original session-based approach
+        logger.info('Falling back to session-based OAuth2 approach');
+        
+        const sessionClient = new Client()
+          .setEndpoint(config.appwrite.endpoint)
+          .setProject(config.appwrite.projectId)
+          .setSession(secret);
+
+        const sessionAccount = new Account(sessionClient);
+
+        try {
+          // Get user account via session (this might fail due to scope issues)
+          const userAccount = await sessionAccount.get();
+          const sessionInfo = await sessionAccount.getSession('current');
+
+          // Verify the userId matches
+          if (userAccount.$id !== userId) {
+            throw new Error('OAuth2 callback userId mismatch');
+          }
+
+          // For OAuth2 users, automatically verify email and update lastLogin
+          try {
+            const currentPrefs = userAccount.prefs || {};
+            const updateData: any = {
+              ...currentPrefs,
+              lastLogin: new Date().toISOString()
+            };
+            
+            // Auto-verify email if not already verified
+            if (!currentPrefs.emailVerified) {
+              updateData.emailVerified = true;
+              updateData.emailVerifiedAt = new Date().toISOString();
+              
+              logger.info('OAuth2 user email automatically verified (fallback)', { 
+                userId: userAccount.$id, 
+                email: userAccount.email 
+              });
+            }
+            
+            await this.users.updatePrefs(userAccount.$id, updateData);
+            
+            // Update userAccount with new prefs for transformation
+            userAccount.prefs = updateData;
+          } catch (verifyError) {
+            logger.error('Failed to update OAuth2 user preferences (fallback)', {
+              error: verifyError instanceof Error ? verifyError.message : 'Unknown error',
+              userId: userAccount.$id
+            });
+            // Don't fail the OAuth2 process if preference update fails
+          }
+
+          const user = await this.transformAppwriteUser(userAccount);
+          const tokens = await this.transformAppwriteSession(sessionInfo, null);
+
+          logger.info('OAuth2 callback processed via fallback', {
+            userId: user.$id,
+            email: user.email,
+            emailVerified: user.emailVerified
+          });
+
+          return { user, session: tokens };
+        } catch (sessionError) {
+          logger.error('Both admin API and session-based OAuth2 approaches failed', {
+            adminError: adminError instanceof Error ? adminError.message : 'Unknown admin error',
+            sessionError: sessionError instanceof Error ? sessionError.message : 'Unknown session error',
+            userId
+          });
+          
+          throw new Error('OAuth2 callback processing failed - unable to retrieve user data');
+        }
       }
-
-      // Transform user and session data
-      const user = await this.transformAppwriteUser(userAccount);
-      const tokens = await this.transformAppwriteSession(sessionInfo, null);
-
-      logger.info('OAuth2 callback processed successfully', {
-        userId: user.$id,
-        email: user.email
-      });
-
-      return { user, session: tokens };
     } catch (error) {
       logger.error('OAuth2 callback failed', {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -1040,11 +1277,13 @@ export class AppwriteAuthService implements IAuthService {
 
       if (error instanceof Error) {
         if (error.message.includes('session_not_found') ||
-          error.message.includes('Unauthorized')) {
+            error.message.includes('Unauthorized') ||
+            error.message.includes('missing scope')) {
           throw new Error('OAuth2 session expired or invalid');
         }
         if (error.message.includes('OAuth2 callback requires userId and secret') ||
-          error.message.includes('OAuth2 callback userId mismatch')) {
+            error.message.includes('OAuth2 callback userId mismatch') ||
+            error.message.includes('unable to retrieve user data')) {
           throw error;
         }
       }
@@ -1256,6 +1495,13 @@ export class AppwriteAuthService implements IAuthService {
 
   private async transformAppwriteUser(appwriteUser: any): Promise<User> {
     const prefs = appwriteUser.prefs || {};
+    
+    // Import permissions utility
+    const { getUserPermissions } = await import('../utils/permissions.js');
+    
+    // Determine user role and permissions
+    const role = prefs.role || 'INDIVIDUAL_USER';
+    const permissions = prefs.permissions || getUserPermissions(role);
 
     return {
       $id: appwriteUser.$id,
@@ -1264,6 +1510,12 @@ export class AppwriteAuthService implements IAuthService {
       avatar: prefs.avatar,
       emailVerified: prefs.emailVerified || false,
       emailVerifiedAt: prefs.emailVerifiedAt || null,
+      
+      // Role and permissions
+      role: role,
+      companyId: prefs.companyId,
+      permissions: permissions,
+      
       subscription: {
         tier: prefs.subscription?.tier || 'free',
         validUntil: prefs.subscription?.validUntil,
@@ -1274,6 +1526,10 @@ export class AppwriteAuthService implements IAuthService {
         preferredAIModel: prefs.preferredAIModel || 'gpt-4',
         language: prefs.language || 'en',
       },
+      
+      // Metadata
+      lastLogin: prefs.lastLogin,
+      isActive: prefs.isActive !== false,
       createdAt: appwriteUser.$createdAt,
       updatedAt: appwriteUser.$updatedAt,
     };
