@@ -125,10 +125,6 @@ export class AuthController extends BaseController {
         if (error.message.includes('Validation error')) {
           return this.handleValidationError(error, set);
         }
-        if (error.message.includes('Invalid email or password')) {
-          set.status = HTTP_STATUS.UNAUTHORIZED;
-          return this.error(ERROR_MESSAGES.INVALID_CREDENTIALS, HTTP_STATUS.UNAUTHORIZED);
-        }
       }
       
       return this.handleBusinessError(error as Error, set);

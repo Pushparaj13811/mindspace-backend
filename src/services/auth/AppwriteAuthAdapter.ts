@@ -7,6 +7,14 @@ import { User as UserDomain } from '../../core/domain/User.js';
 import { Permission as PermissionDomain } from '../../core/domain/Permission.js';
 import { jwtBlacklist } from '../../utils/jwtBlacklist.js';
 import { createTokens, verifyToken, verifyRefreshToken } from '../../utils/jwt.js';
+import { 
+  AuthenticationError, 
+  ConflictError, 
+  RateLimitError, 
+  ServiceUnavailableError,
+  createInvalidCredentialsError,
+  createUserExistsError 
+} from '../../utils/BusinessError.js';
 
 /**
  * Appwrite implementation of the authentication service
@@ -37,12 +45,21 @@ export class AppwriteAuthAdapter implements IAuthService {
   async register(userData: RegisterRequest): Promise<{ user: User; session: AuthTokens }> {
     try {
       // Create user in Appwrite
-      const appwriteUser = await this.users.create(
+      // Note: phoneNumber parameter is optional in Appwrite Users.create()
+      // If not provided, we don't pass it to avoid sending undefined
+      const createParams = [
         ID.unique(),
         userData.email,
         userData.password,
         userData.name
-      );
+      ];
+      
+      // Only add phoneNumber if it's provided and not undefined/empty
+      if (userData.phoneNumber) {
+        createParams.push(userData.phoneNumber);
+      }
+      
+      const appwriteUser = await this.users.create(...createParams);
 
       // Create user domain object with default role
       const userDomain = UserDomain.create({
@@ -79,7 +96,7 @@ export class AppwriteAuthAdapter implements IAuthService {
     } catch (error) {
       logger.error('Registration failed:', error);
       if (error instanceof AppwriteException) {
-        throw new Error(this.mapAppwriteError(error));
+        throw this.mapAppwriteErrorToBusinessError(error);
       }
       throw error;
     }
@@ -158,7 +175,7 @@ export class AppwriteAuthAdapter implements IAuthService {
     } catch (error) {
       logger.error('Login failed:', error);
       if (error instanceof AppwriteException) {
-        throw new Error(this.mapAppwriteError(error));
+        throw this.mapAppwriteErrorToBusinessError(error);
       }
       throw error;
     }
@@ -186,7 +203,10 @@ export class AppwriteAuthAdapter implements IAuthService {
       logger.info('User logged out successfully:', { userId: payload.userId });
     } catch (error) {
       logger.error('Logout failed:', error);
-      throw new Error('Failed to logout');
+      if (error instanceof AppwriteException) {
+        throw this.mapAppwriteErrorToBusinessError(error);
+      }
+      throw new AuthenticationError('Failed to logout');
     }
   }
 
@@ -243,7 +263,10 @@ export class AppwriteAuthAdapter implements IAuthService {
       return { user: userDomain.toData(), session };
     } catch (error) {
       logger.error('Session validation failed:', error);
-      throw new Error('Invalid session');
+      if (error instanceof AppwriteException) {
+        throw this.mapAppwriteErrorToBusinessError(error);
+      }
+      throw new AuthenticationError('Invalid session');
     }
   }
 
@@ -263,7 +286,7 @@ export class AppwriteAuthAdapter implements IAuthService {
       });
     } catch (error) {
       logger.error('Token refresh failed:', error);
-      throw new Error('Invalid refresh token');
+      throw new AuthenticationError('Invalid refresh token');
     }
   }
 
@@ -314,7 +337,10 @@ export class AppwriteAuthAdapter implements IAuthService {
       return userDomain.toData();
     } catch (error) {
       logger.error('Profile update failed:', error);
-      throw new Error('Failed to update profile');
+      if (error instanceof AppwriteException) {
+        throw this.mapAppwriteErrorToBusinessError(error);
+      }
+      throw new AuthenticationError('Failed to update profile');
     }
   }
 
@@ -355,7 +381,10 @@ export class AppwriteAuthAdapter implements IAuthService {
       return userDomain.toData();
     } catch (error) {
       logger.error('Preferences update failed:', error);
-      throw new Error('Failed to update preferences');
+      if (error instanceof AppwriteException) {
+        throw this.mapAppwriteErrorToBusinessError(error);
+      }
+      throw new AuthenticationError('Failed to update preferences');
     }
   }
 
@@ -404,9 +433,9 @@ export class AppwriteAuthAdapter implements IAuthService {
     } catch (error) {
       logger.error('Password change failed:', error);
       if (error instanceof AppwriteException) {
-        throw new Error(this.mapAppwriteError(error));
+        throw this.mapAppwriteErrorToBusinessError(error);
       }
-      throw new Error('Failed to change password');
+      throw new AuthenticationError('Failed to change password');
     }
   }
 
@@ -898,6 +927,21 @@ export class AppwriteAuthAdapter implements IAuthService {
         return 'Too many requests. Please try again after some time';
       default:
         return error.message || 'Authentication failed';
+    }
+  }
+
+  private mapAppwriteErrorToBusinessError(error: AppwriteException): Error {
+    switch (error.code) {
+      case 401:
+        return createInvalidCredentialsError();
+      case 409:
+        return createUserExistsError();
+      case 429:
+        return new RateLimitError('Too many requests. Please try again after some time');
+      case 503:
+        return new ServiceUnavailableError('Authentication service is temporarily unavailable');
+      default:
+        return new AuthenticationError(error.message || 'Authentication failed');
     }
   }
 

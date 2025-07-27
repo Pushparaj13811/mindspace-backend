@@ -33,33 +33,46 @@ export class JournalController extends BaseController {
       // Validate request body
       const validatedData = this.validateRequestBody(createJournalSchema, body);
       
-      // Create journal entry through database service
+      // Create journal entry through database service (flatten for Appwrite)
       const journalData = {
-        ...validatedData,
         userId: user.$id,
-        encrypted: false,
+        title: validatedData.title,
+        content: validatedData.content,
+        
+        // Flatten mood data
+        moodCurrent: validatedData.mood.current,
+        moodIntensity: validatedData.mood.intensity,
+        moodTimestamp: validatedData.mood.timestamp || new Date().toISOString(),
+        moodTriggers: validatedData.mood.triggers || [],
+        moodNotes: validatedData.mood.notes || '',
+        
+        // Flatten attachments
         tags: validatedData.tags || [],
-        attachments: {
-          images: validatedData.attachments?.images?.filter(img => img && img.trim()) || [],
-          voiceRecording: validatedData.attachments?.voiceRecording
-        },
-        mood: {
-          ...validatedData.mood,
-          timestamp: validatedData.mood.timestamp || new Date().toISOString()
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        attachmentImages: validatedData.attachments?.images?.filter(img => img && img.trim()) || [],
+        attachmentVoiceRecording: validatedData.attachments?.voiceRecording || '',
+        
+        // AI insights (disabled for now due to attribute limits)
+        // aiInsightsSentiment: null,
+        // aiInsightsEmotions: [],
+        // aiInsightsThemes: [],
+        // aiInsightsSuggestions: [],
+        
+        // Metadata
+        encrypted: false
       };
       
-      const journalEntry = await this.services.databaseService.create<JournalEntry>('journals', journalData);
+      const journalEntry = await this.services.databaseService.create<any>('journals', journalData);
       
       this.logAction('journal_entry_created', user, { 
         entryId: journalEntry.$id 
       });
       
+      // Transform back to nested structure for response
+      const responseEntry = this.transformJournalToResponse(journalEntry);
+      
       set.status = HTTP_STATUS.CREATED;
       return this.success(
-        { entry: journalEntry }, 
+        { entry: responseEntry }, 
         SUCCESS_MESSAGES.JOURNAL_CREATED, 
         HTTP_STATUS.CREATED
       );
@@ -113,15 +126,18 @@ export class JournalController extends BaseController {
       }
       
       // Get journal entries through database service
-      const result = await this.services.databaseService.list<JournalEntry>('journals', queries);
+      const result = await this.services.databaseService.list<any>('journals', queries);
+      
+      // Transform flattened data to response format
+      const transformedEntries = result.documents.map(entry => this.transformJournalToResponse(entry));
       
       this.logAction('journal_entries_retrieved', user, { 
-        count: result.documents.length,
+        count: transformedEntries.length,
         total: result.total 
       });
       
       return this.success({
-        entries: result.documents,
+        entries: transformedEntries,
         pagination: {
           total: result.total,
           page,
@@ -155,11 +171,14 @@ export class JournalController extends BaseController {
       await this.requireResourceAccess(user, 'journal', id, 'view');
       
       // Get journal entry through database service
-      const journalEntry = await this.services.databaseService.read<JournalEntry>('journals', id);
+      const journalEntry = await this.services.databaseService.read<any>('journals', id);
+      
+      // Transform flattened data to response format
+      const transformedEntry = this.transformJournalToResponse(journalEntry);
       
       this.logAction('journal_entry_retrieved', user, { entryId: id });
       
-      return this.success({ entry: journalEntry });
+      return this.success({ entry: transformedEntry });
       
     } catch (error) {
       this.logError(error as Error, 'get_journal_entry');
@@ -187,21 +206,32 @@ export class JournalController extends BaseController {
       // Validate request body
       const validatedData = this.validateRequestBody(updateJournalSchema, body);
       
-      // Prepare update data
-      const updateData: any = { ...validatedData };
+      // Prepare flattened update data
+      const updateData: any = {};
       
-      // Handle mood timestamp if provided
-      if (updateData.mood && !updateData.mood.timestamp) {
-        updateData.mood.timestamp = new Date().toISOString();
+      if (validatedData.title) updateData.title = validatedData.title;
+      if (validatedData.content) updateData.content = validatedData.content;
+      if (validatedData.tags) updateData.tags = validatedData.tags;
+      
+      // Handle mood data flattening
+      if (validatedData.mood) {
+        if (validatedData.mood.current) updateData.moodCurrent = validatedData.mood.current;
+        if (validatedData.mood.intensity !== undefined) updateData.moodIntensity = validatedData.mood.intensity;
+        updateData.moodTimestamp = validatedData.mood.timestamp || new Date().toISOString();
+        if (validatedData.mood.triggers) updateData.moodTriggers = validatedData.mood.triggers;
+        if (validatedData.mood.notes) updateData.moodNotes = validatedData.mood.notes;
       }
       
       // Update journal entry through database service
-      const updatedEntry = await this.services.databaseService.update<JournalEntry>('journals', id, updateData);
+      const updatedEntry = await this.services.databaseService.update<any>('journals', id, updateData);
+      
+      // Transform response back to nested format
+      const transformedEntry = this.transformJournalToResponse(updatedEntry);
       
       this.logAction('journal_entry_updated', user, { entryId: id });
       
       return this.success(
-        { entry: updatedEntry }, 
+        { entry: transformedEntry }, 
         SUCCESS_MESSAGES.JOURNAL_UPDATED
       );
       
@@ -233,11 +263,11 @@ export class JournalController extends BaseController {
       
       this.logAction('journal_entry_deleted', user, { entryId: id });
       
-      set.status = HTTP_STATUS.NO_CONTENT;
+      set.status = HTTP_STATUS.OK;
       return this.success(
-        { message: SUCCESS_MESSAGES.JOURNAL_DELETED },
+        { message: SUCCESS_MESSAGES.JOURNAL_DELETED, deletedId: id },
         SUCCESS_MESSAGES.JOURNAL_DELETED,
-        HTTP_STATUS.NO_CONTENT
+        HTTP_STATUS.OK
       );
       
     } catch (error) {
@@ -270,14 +300,16 @@ export class JournalController extends BaseController {
       });
       
       // Search journal entries through database service
-      const result = await this.services.databaseService.search<JournalEntry>(
+      const result = await this.services.databaseService.search<any>(
         'journals', 
         queryParams.search, 
         ['title', 'content']
       );
       
-      // Filter to user's entries only
-      const userEntries = result.documents.filter(entry => entry.userId === user.$id);
+      // Filter to user's entries only and transform to response format
+      const userEntries = result.documents
+        .filter(entry => entry.userId === user.$id)
+        .map(entry => this.transformJournalToResponse(entry));
       
       this.logAction('journal_search_completed', user, { 
         query: queryParams.search,
@@ -346,15 +378,18 @@ export class JournalController extends BaseController {
       }
       
       // Get journal entries through database service
-      const result = await this.services.databaseService.list<JournalEntry>('journals', queries);
+      const result = await this.services.databaseService.list<any>('journals', queries);
+      
+      // Transform flattened data to response format
+      const transformedEntries = result.documents.map(entry => this.transformJournalToResponse(entry));
       
       this.logAction('all_journal_entries_retrieved_admin', user, { 
-        count: result.documents.length,
+        count: transformedEntries.length,
         total: result.total 
       });
       
       return this.success({
-        entries: result.documents,
+        entries: transformedEntries,
         pagination: {
           total: result.total,
           page,
@@ -400,13 +435,13 @@ export class JournalController extends BaseController {
       }
       
       // Get journal entries for analytics
-      const result = await this.services.databaseService.list<JournalEntry>('journals', queries);
+      const result = await this.services.databaseService.list<any>('journals', queries);
       
       // Calculate basic analytics
       const analytics = {
         totalEntries: result.total,
         entriesThisMonth: result.documents.filter(entry => {
-          const entryDate = new Date(entry.createdAt);
+          const entryDate = new Date(entry.$createdAt);
           const now = new Date();
           return entryDate.getMonth() === now.getMonth() && entryDate.getFullYear() === now.getFullYear();
         }).length,
@@ -430,11 +465,11 @@ export class JournalController extends BaseController {
   /**
    * Calculate mood distribution for analytics
    */
-  private calculateMoodDistribution(entries: JournalEntry[]) {
+  private calculateMoodDistribution(entries: any[]) {
     const moodCounts: Record<string, number> = {};
     
     entries.forEach(entry => {
-      const mood = entry.mood?.current;
+      const mood = entry.moodCurrent; // Access flattened field
       if (mood) {
         moodCounts[mood] = (moodCounts[mood] || 0) + 1;
       }
@@ -446,12 +481,12 @@ export class JournalController extends BaseController {
   /**
    * Calculate popular tags for analytics
    */
-  private calculatePopularTags(entries: JournalEntry[]) {
+  private calculatePopularTags(entries: any[]) {
     const tagCounts: Record<string, number> = {};
     
     entries.forEach(entry => {
       if (entry.tags && entry.tags.length > 0) {
-        entry.tags.forEach(tag => {
+        entry.tags.forEach((tag: string) => {
           if (tag && tag.trim()) {
             tagCounts[tag] = (tagCounts[tag] || 0) + 1;
           }
@@ -463,5 +498,35 @@ export class JournalController extends BaseController {
       .sort(([, a], [, b]) => b - a)
       .slice(0, 10)
       .map(([tag, count]) => ({ tag, count }));
+  }
+
+  /**
+   * Transform flattened journal data to nested response structure
+   */
+  private transformJournalToResponse(dbEntry: any): JournalEntry {
+    return {
+      $id: dbEntry.$id,
+      $createdAt: dbEntry.$createdAt,
+      $updatedAt: dbEntry.$updatedAt,
+      userId: dbEntry.userId,
+      title: dbEntry.title,
+      content: dbEntry.content,
+      mood: {
+        current: dbEntry.moodCurrent,
+        intensity: dbEntry.moodIntensity,
+        timestamp: dbEntry.moodTimestamp,
+        triggers: dbEntry.moodTriggers || [],
+        notes: dbEntry.moodNotes
+      },
+      tags: dbEntry.tags || [],
+      attachments: {
+        images: dbEntry.attachmentImages || [],
+        voiceRecording: dbEntry.attachmentVoiceRecording
+      },
+      aiInsights: undefined, // Disabled for now due to attribute limits
+      encrypted: dbEntry.encrypted,
+      createdAt: dbEntry.$createdAt,
+      updatedAt: dbEntry.$updatedAt
+    };
   }
 }

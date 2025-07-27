@@ -15,6 +15,7 @@ export const companyRoutes = new Elysia({
   .post('/', withServices(async (services, context) => {
     // Require super admin role
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN']);
+    context.user = user;
     
     const controller = new CompanyController(services);
     return await controller.createCompany(context);
@@ -39,6 +40,7 @@ export const companyRoutes = new Elysia({
   .get('/', withServices(async (services, context) => {
     // Require super admin role
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN']);
+    context.user = user;
     
     const controller = new CompanyController(services);
     return await controller.listCompanies(context);
@@ -57,18 +59,21 @@ export const companyRoutes = new Elysia({
   
   .get('/:companyId', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.getCompany(context);
   }))
   
   .patch('/:companyId', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.updateCompany(context);
   }))
   
   .delete('/:companyId', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN']);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.deleteCompany(context);
   }))
@@ -76,24 +81,28 @@ export const companyRoutes = new Elysia({
   // User management within company
   .post('/:companyId/invite', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.inviteUser(context);
   }))
   
   .get('/:companyId/users', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.getCompanyUsers(context);
   }))
   
   .patch('/:companyId/users/:userId/role', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.updateUserRole(context);
   }))
   
   .delete('/:companyId/users/:userId', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.removeUser(context);
   }))
@@ -101,6 +110,7 @@ export const companyRoutes = new Elysia({
   // Analytics
   .get('/:companyId/analytics', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.getCompanyAnalytics(context);
   }))
@@ -108,6 +118,7 @@ export const companyRoutes = new Elysia({
   // Platform analytics (Super admin only)
   .get('/platform/analytics', withServices(async (services, context) => {
     const user = await authMiddleware().requireAuthWithAnyRole(context, ['SUPER_ADMIN']);
+    context.user = user;
     const controller = new CompanyController(services);
     return await controller.getPlatformAnalytics(context);
   }))

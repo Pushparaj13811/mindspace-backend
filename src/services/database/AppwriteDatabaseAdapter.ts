@@ -144,16 +144,33 @@ export class AppwriteDatabaseAdapter implements IDatabaseService {
     try {
       const collectionId = this.getCollectionId(collection);
       
-      // Create search queries for each field
-      const searchQueries = searchFields.map(field => 
-        Query.search(field, searchTerm)
-      );
-
+      // For Appwrite, we need to search each field separately and combine results
+      // Since Appwrite doesn't support OR queries in a single request, we'll search the first field
+      // and then filter on the client side or use the most relevant field (title first, then content)
+      const primaryField = searchFields[0] || 'title';
+      
       const result = await this.databases.listDocuments(
         config.appwrite.databaseId,
         collectionId,
-        searchQueries
+        [Query.search(primaryField, searchTerm)]
       );
+
+      // If no results from primary field and we have more fields, try the secondary field
+      if (result.documents.length === 0 && searchFields.length > 1) {
+        const secondaryField = searchFields[1];
+        if (secondaryField) {
+          const secondaryResult = await this.databases.listDocuments(
+            config.appwrite.databaseId,
+            collectionId,
+            [Query.search(secondaryField, searchTerm)]
+          );
+        
+          return {
+            documents: secondaryResult.documents as T[],
+            total: secondaryResult.total
+          };
+        }
+      }
 
       return {
         documents: result.documents as T[],

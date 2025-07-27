@@ -14,6 +14,13 @@ export const registerSchema = z.object({
   name: z.string()
     .min(2, 'Name must be at least 2 characters long')
     .max(100, 'Name must be less than 100 characters'),
+  phoneNumber: z.string()
+    .regex(/^[\+]?[1-9][\d]{0,15}$/, 'Invalid phone number format')
+    .optional()
+    .transform((val) => {
+      // Return undefined if empty string or not provided
+      return val && val.trim() !== "" ? val : undefined;
+    }),
 });
 
 export const refreshTokenSchema = z.object({
@@ -34,24 +41,59 @@ export const oauth2CallbackSchema = z.object({
 
 // Mood schemas
 export const moodStateSchema = z.object({
-  current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed']),
+  current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed', 'excited', 'angry', 'peaceful', 'stressed']),
   intensity: z.number().min(1).max(10),
-  timestamp: z.string().datetime().optional().or(z.literal("")).transform((val) => {
+  timestamp: z.string().optional().transform((val) => {
     // If empty string or not provided, use current timestamp
     if (!val || val === "") {
       return new Date().toISOString();
     }
-    return val;
+    
+    // Try to parse the provided timestamp
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid datetime');
+      }
+      return date.toISOString();
+    } catch (error) {
+      throw new Error('Invalid datetime');
+    }
   }),
   triggers: z.array(z.string()).optional(),
   notes: z.string().max(500).optional(),
 });
 
 export const moodLogSchema = z.object({
-  current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed']),
+  current: z.enum(['happy', 'sad', 'anxious', 'calm', 'energetic', 'depressed', 'excited', 'angry', 'peaceful', 'stressed']),
   intensity: z.number().min(1, 'Intensity must be between 1 and 10').max(10, 'Intensity must be between 1 and 10'),
-  triggers: z.array(z.string()).optional(),
+  timestamp: z.string().optional().transform((val) => {
+    // If empty string or not provided, use current timestamp
+    if (!val || val === "") {
+      return new Date().toISOString();
+    }
+    
+    // Try to parse the provided timestamp
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid datetime');
+      }
+      return date.toISOString();
+    } catch (error) {
+      throw new Error('Invalid datetime');
+    }
+  }),
+  triggers: z.array(z.string().max(100)).max(10, 'Maximum 10 triggers allowed').optional(),
   notes: z.string().max(500, 'Notes must be less than 500 characters').optional(),
+  // Extended mood tracking fields (flattened for database compatibility)
+  location: z.string().max(200).optional(),
+  weather: z.string().max(50).optional(),
+  activities: z.array(z.string().max(100)).max(10, 'Maximum 10 activities').optional(),
+  sleepQuality: z.number().min(1).max(10).optional(),
+  stressLevel: z.number().min(1).max(10).optional(),
+  energyLevel: z.number().min(1).max(10).optional(),
+  socialInteraction: z.string().max(50).optional(),
 });
 
 export const moodQuerySchema = z.object({
@@ -59,8 +101,26 @@ export const moodQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   sortBy: z.enum(['timestamp', 'intensity', 'current']).default('timestamp'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
-  dateFrom: z.string().datetime().optional(),
-  dateTo: z.string().datetime().optional(),
+  dateFrom: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) throw new Error('Invalid date');
+      return date.toISOString();
+    } catch {
+      throw new Error('Invalid dateFrom format');
+    }
+  }),
+  dateTo: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) throw new Error('Invalid date');
+      return date.toISOString();
+    } catch {
+      throw new Error('Invalid dateTo format');
+    }
+  }),
   mood: z.string().optional(),
   minIntensity: z.coerce.number().min(1).max(10).optional(),
   maxIntensity: z.coerce.number().min(1).max(10).optional(),
@@ -111,8 +171,26 @@ export const journalQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   search: z.string().max(100).optional(),
   tags: z.string().transform(str => str.split(',').filter(Boolean)).optional(),
-  dateFrom: z.string().datetime().optional(),
-  dateTo: z.string().datetime().optional(),
+  dateFrom: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) throw new Error('Invalid date');
+      return date.toISOString();
+    } catch {
+      throw new Error('Invalid dateFrom format');
+    }
+  }),
+  dateTo: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) throw new Error('Invalid date');
+      return date.toISOString();
+    } catch {
+      throw new Error('Invalid dateTo format');
+    }
+  }),
 });
 
 // AI schemas
@@ -224,7 +302,16 @@ export const notificationSchema = z.object({
   title: z.string().min(1).max(100),
   body: z.string().min(1).max(500),
   data: z.record(z.any()).optional(),
-  scheduledFor: z.string().datetime().optional(),
+  scheduledFor: z.string().optional().transform((val) => {
+    if (!val) return undefined;
+    try {
+      const date = new Date(val);
+      if (isNaN(date.getTime())) throw new Error('Invalid date');
+      return date.toISOString();
+    } catch {
+      throw new Error('Invalid scheduledFor format');
+    }
+  }),
 });
 
 // Type inference helpers

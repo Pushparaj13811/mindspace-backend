@@ -12,6 +12,7 @@ export const aiRoutes = new Elysia()
   .post('/chat', withServices(async (services, context) => {
     // Require authentication with AI features permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    context.user = user;
     
     const controller = new AIController(services);
     return await controller.chatWithAI(context);
@@ -39,6 +40,7 @@ export const aiRoutes = new Elysia()
   .post('/analyze/journal', withServices(async (services, context) => {
     // Require authentication with AI features permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    context.user = user;
     
     const controller = new AIController(services);
     return await controller.analyzeJournal(context);
@@ -61,6 +63,7 @@ export const aiRoutes = new Elysia()
   .get('/insights/mood', withServices(async (services, context) => {
     // Require authentication with AI features permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    context.user = user;
     
     const controller = new AIController(services);
     return await controller.getMoodInsights(context);
@@ -87,6 +90,7 @@ export const aiRoutes = new Elysia()
   .get('/content/wellness', withServices(async (services, context) => {
     // Require authentication with AI features permission
     const user = await authMiddleware().requireAuthWithPermission(context, 'use_ai_features');
+    context.user = user;
     
     const controller = new AIController(services);
     return await controller.getWellnessContent(context);
@@ -114,6 +118,7 @@ export const aiRoutes = new Elysia()
   .get('/capabilities', withServices(async (services, context) => {
     // Require authentication
     const user = await authMiddleware().requireAuth(context);
+    context.user = user;
     
     const controller = new AIController(services);
     return await controller.getAICapabilities(context);

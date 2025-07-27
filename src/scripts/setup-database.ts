@@ -88,14 +88,22 @@ class DatabaseSetup {
     // Create collection
     await this.createCollection(schema);
 
-    // Create attributes
-    for (const attribute of schema.attributes) {
-      await this.createAttribute(schema.name, attribute);
+    // Create attributes if schema has them
+    if (schema.attributes && Array.isArray(schema.attributes)) {
+      for (const attribute of schema.attributes) {
+        await this.createAttribute(schema.name, attribute);
+      }
+    } else {
+      console.log(`   ⚠️  No attributes defined for ${schema.name} collection`);
     }
 
-    // Create indexes
-    for (const index of schema.indexes) {
-      await this.createIndex(schema.name, index);
+    // Create indexes if schema has them
+    if (schema.indexes && Array.isArray(schema.indexes)) {
+      for (const index of schema.indexes) {
+        await this.createIndex(schema.name, index);
+      }
+    } else {
+      console.log(`   ⚠️  No indexes defined for ${schema.name} collection`);
     }
 
     console.log(`✅ ${schema.name} collection setup complete`);
