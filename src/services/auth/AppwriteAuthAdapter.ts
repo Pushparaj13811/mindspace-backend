@@ -47,19 +47,21 @@ export class AppwriteAuthAdapter implements IAuthService {
       // Create user in Appwrite
       // Note: phoneNumber parameter is optional in Appwrite Users.create()
       // If not provided, we don't pass it to avoid sending undefined
-      const createParams = [
-        ID.unique(),
-        userData.email,
-        userData.password,
-        userData.name
-      ];
-      
       // Only add phoneNumber if it's provided and not undefined/empty
-      if (userData.phoneNumber) {
-        createParams.push(userData.phoneNumber);
-      }
-      
-      const appwriteUser = await this.users.create(...createParams);
+      const appwriteUser = userData.phoneNumber 
+        ? await this.users.create(
+            ID.unique(),
+            userData.email,
+            userData.password,
+            userData.name,
+            userData.phoneNumber
+          )
+        : await this.users.create(
+            ID.unique(),
+            userData.email,
+            userData.password,
+            userData.name
+          );
 
       // Create user domain object with default role
       const userDomain = UserDomain.create({
