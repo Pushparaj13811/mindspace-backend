@@ -231,6 +231,7 @@ export const updateProfileSchema = z.object({
     .max(100, 'Name must be less than 100 characters')
     .optional(),
   avatar: z.string().url('Invalid avatar URL').optional(),
+  onboardingCompleted: z.boolean().optional(),
 });
 
 export const updatePreferencesSchema = z.object({

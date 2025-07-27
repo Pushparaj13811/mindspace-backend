@@ -244,6 +244,12 @@ export class AuthController extends BaseController {
         validatedData
       );
       
+      console.log('📤 Returning updated user from API:', {
+        userId: updatedUser.$id,
+        onboardingCompleted: updatedUser.onboardingCompleted,
+        updatedFields: Object.keys(validatedData)
+      });
+      
       this.logAction('update_profile_success', user);
       
       return this.success(
@@ -482,22 +488,22 @@ export class AuthController extends BaseController {
       const validatedQuery = this.validateQueryParams(oauth2CallbackSchema, query);
       
       // Process OAuth2 callback through service
-      const { user, session } = await this.services.authService.handleOAuth2Callback(
+      const { user, session, isNewUser } = await this.services.authService.handleOAuth2Callback(
         validatedQuery.userId,
         validatedQuery.secret
       );
       
-      // Send welcome email for OAuth2 users (non-blocking)
-      // Note: For OAuth2, we can't easily detect if user is new, so we send welcome email
-      // The EmailService should handle duplicate emails gracefully
-      if (this.services.emailService) {
+      // Send welcome email only for new OAuth2 users (non-blocking)
+      if (isNewUser && this.services.emailService) {
         try {
           await this.services.emailService.sendWelcomeEmail(user.email, user.name);
-          this.logAction('oauth2_welcome_email_sent', user, { email: user.email });
+          this.logAction('oauth2_welcome_email_sent', user, { email: user.email, isNewUser });
         } catch (emailError) {
           // Log email error but don't fail OAuth2 authentication
           this.logError(emailError as Error, 'send_oauth2_welcome_email', user);
         }
+      } else if (!isNewUser) {
+        this.logAction('oauth2_returning_user', user, { email: user.email, isNewUser });
       }
       
       this.logAction('oauth2_success', user, { 

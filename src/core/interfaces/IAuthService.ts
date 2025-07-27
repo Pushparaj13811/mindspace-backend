@@ -17,7 +17,7 @@ export interface IAuthService {
   
   // User management
   getCurrentUser(sessionId: string): Promise<User>;
-  updateProfile(sessionId: string, updates: { name?: string; avatar?: string }): Promise<User>;
+  updateProfile(sessionId: string, updates: { name?: string; avatar?: string; onboardingCompleted?: boolean }): Promise<User>;
   updatePreferences(sessionId: string, preferences: {
     theme?: 'light' | 'dark' | 'auto';
     notifications?: boolean;
@@ -39,7 +39,7 @@ export interface IAuthService {
   
   // OAuth2 methods
   createOAuth2Session(provider: string, successUrl?: string, failureUrl?: string): Promise<string>;
-  handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens }>;
+  handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens; isNewUser: boolean }>;
   listOAuth2Sessions(sessionId: string): Promise<OAuth2Session[]>;
   deleteOAuth2Session(sessionId: string, provider: string): Promise<void>;
   

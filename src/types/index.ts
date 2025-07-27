@@ -62,6 +62,7 @@ export interface User {
   // Metadata
   lastLogin?: string;
   isActive: boolean;
+  onboardingCompleted: boolean;
   createdAt: string;
   updatedAt: string;
 }

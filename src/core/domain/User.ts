@@ -62,7 +62,7 @@ export class User {
   get updatedAt(): string { return this.data.updatedAt; }
 
   // Business methods
-  updateProfile(updates: { name?: string; avatar?: string }): void {
+  updateProfile(updates: { name?: string; avatar?: string; onboardingCompleted?: boolean }): void {
     if (updates.name !== undefined) {
       if (!updates.name || updates.name.trim().length < 2) {
         throw new Error('Name must be at least 2 characters long');
@@ -72,6 +72,10 @@ export class User {
 
     if (updates.avatar !== undefined) {
       this.data.avatar = updates.avatar;
+    }
+
+    if (updates.onboardingCompleted !== undefined) {
+      (this.data as any).onboardingCompleted = updates.onboardingCompleted;
     }
 
     this.data.updatedAt = new Date().toISOString();
