@@ -62,13 +62,19 @@ export const authRoutes = new Elysia()
 
   // Logout endpoint
   .post('/logout', withServices(async (services, context) => {
+    // Extract JWT token from authorization header
+    const authHeader = context.request?.headers.get('authorization') || context.headers?.['authorization'];
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    
     // Require authentication
     const user = await authMiddleware().requireAuth(context);
     context.user = user;
+    context.session = token; // Pass the token as session
     
     const controller = new AuthController(services);
     return await controller.logout(context);
   }), {
+    body: t.Optional(t.Any()), // Accept any body including empty
     detail: {
       tags: ['Auth'],
       summary: 'Logout user',
@@ -106,11 +112,34 @@ export const authRoutes = new Elysia()
     body: t.Object({
       name: t.Optional(t.String({ minLength: 2, maxLength: 100 })),
       avatar: t.Optional(t.String({ format: 'uri' })),
+      onboardingCompleted: t.Optional(t.Boolean()),
     }),
     detail: {
       tags: ['Auth'],
       summary: 'Update user profile',
       description: 'Updates the authenticated user\'s profile information',
+      security: [{ bearerAuth: [] }],
+    },
+  })
+
+  // Update user profile (PATCH method for frontend compatibility)
+  .patch('/profile', withServices(async (services, context) => {
+    // Require authentication
+    const user = await authMiddleware().requireAuth(context);
+    context.user = user;
+    
+    const controller = new AuthController(services);
+    return await controller.updateProfile(context);
+  }), {
+    body: t.Object({
+      name: t.Optional(t.String({ minLength: 2, maxLength: 100 })),
+      avatar: t.Optional(t.String({ format: 'uri' })),
+      onboardingCompleted: t.Optional(t.Boolean()),
+    }),
+    detail: {
+      tags: ['Auth'],
+      summary: 'Update user profile (PATCH)',
+      description: 'Updates the authenticated user\'s profile information using PATCH method',
       security: [{ bearerAuth: [] }],
     },
   })
