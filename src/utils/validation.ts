@@ -14,6 +14,13 @@ export const registerSchema = z.object({
   name: z.string()
     .min(2, 'Name must be at least 2 characters long')
     .max(100, 'Name must be less than 100 characters'),
+  phoneNumber: z.string()
+    .regex(/^[\+]?[1-9][\d]{0,15}$/, 'Invalid phone number format')
+    .optional()
+    .transform((val) => {
+      // Return undefined if empty string or not provided
+      return val && val.trim() !== "" ? val : undefined;
+    }),
 });
 
 export const refreshTokenSchema = z.object({

@@ -17,6 +17,10 @@ export const authRoutes = new Elysia()
       email: t.String({ format: 'email' }),
       password: t.String({ minLength: 8 }),
       name: t.String({ minLength: 2, maxLength: 100 }),
+      phoneNumber: t.Optional(t.String({ 
+        pattern: '^[\\+]?[1-9][\\d]{0,15}$',
+        description: 'Optional phone number in international format'
+      })),
     }),
     detail: {
       tags: ['Auth'],
