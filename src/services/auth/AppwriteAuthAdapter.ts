@@ -75,7 +75,8 @@ export class AppwriteAuthAdapter implements IAuthService {
           notifications: true,
           preferredAIModel: 'gpt-4',
           language: 'en'
-        }
+        },
+        onboardingCompleted: false
       });
 
       // Update Appwrite user preferences with our user data
@@ -134,6 +135,22 @@ export class AppwriteAuthAdapter implements IAuthService {
       const appwriteUser = await this.users.get(appwriteSession.userId);
       const userPrefs = appwriteUser.prefs as any;
 
+      console.log('🔍 Login - User preferences from Appwrite:', {
+        userId: appwriteUser.$id,
+        hasOnboardingCompleted: 'onboardingCompleted' in userPrefs,
+        onboardingCompletedValue: userPrefs.onboardingCompleted,
+        onboardingCompletedType: typeof userPrefs.onboardingCompleted,
+        allPrefs: Object.keys(userPrefs)
+      });
+
+      // Migration: Ensure onboardingCompleted field exists for existing users
+      // For existing users, if they don't have onboardingCompleted field, set it to true
+      // (assuming they've already completed onboarding since they're logging in)
+      if (!('onboardingCompleted' in userPrefs)) {
+        console.log('🔄 Migrating user - setting onboardingCompleted to true for existing user');
+        userPrefs.onboardingCompleted = true;
+      }
+
       // Create user domain object
       const userDomain = UserDomain.fromData({
         $id: appwriteUser.$id,
@@ -153,8 +170,15 @@ export class AppwriteAuthAdapter implements IAuthService {
         },
         lastLogin: userPrefs.lastLogin,
         isActive: userPrefs.isActive !== false,
+        onboardingCompleted: userPrefs.onboardingCompleted || false,
         createdAt: appwriteUser.$createdAt,
         updatedAt: appwriteUser.$updatedAt
+      });
+
+      console.log('🔍 Login - User domain object created:', {
+        userId: userDomain.id,
+        onboardingCompletedInDomain: (userDomain as any).data.onboardingCompleted,
+        onboardingCompletedInToData: userDomain.toData().onboardingCompleted
       });
 
       // Update last login
@@ -224,6 +248,12 @@ export class AppwriteAuthAdapter implements IAuthService {
       const appwriteUser = await this.users.get(payload.userId);
       const userPrefs = appwriteUser.prefs as any;
 
+      // Migration: Ensure onboardingCompleted field exists for existing users
+      if (!('onboardingCompleted' in userPrefs)) {
+        console.log('🔄 Migrating user in validateSession - setting onboardingCompleted to true');
+        userPrefs.onboardingCompleted = true;
+      }
+
       // Create user domain object
       const userDomain = UserDomain.fromData({
         $id: appwriteUser.$id,
@@ -243,6 +273,7 @@ export class AppwriteAuthAdapter implements IAuthService {
         },
         lastLogin: userPrefs.lastLogin,
         isActive: userPrefs.isActive !== false,
+        onboardingCompleted: userPrefs.onboardingCompleted || false,
         createdAt: appwriteUser.$createdAt,
         updatedAt: appwriteUser.$updatedAt
       });
@@ -295,7 +326,7 @@ export class AppwriteAuthAdapter implements IAuthService {
     return user;
   }
 
-  async updateProfile(sessionId: string, updates: { name?: string; avatar?: string }): Promise<User> {
+  async updateProfile(sessionId: string, updates: { name?: string; avatar?: string; onboardingCompleted?: boolean }): Promise<User> {
     try {
       // sessionId could be either a token or a userId, try token first
       let userId: string;
@@ -596,11 +627,20 @@ export class AppwriteAuthAdapter implements IAuthService {
     }
   }
 
-  async handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens }> {
+  async handleOAuth2Callback(userId: string, secret: string): Promise<{ user: User; session: AuthTokens; isNewUser: boolean }> {
     try {
       // Get user using admin API (to avoid scope issues)
       const adminUser = await this.users.get(userId);
       let currentPrefs = adminUser.prefs as any;
+
+      // Detect if this is a new user by checking if they have a role or lastLogin
+      const isNewUser = !currentPrefs.role || !currentPrefs.lastLogin;
+
+      // Migration: Ensure onboardingCompleted field exists for existing users
+      if (!('onboardingCompleted' in currentPrefs)) {
+        console.log('🔄 Migrating OAuth user - setting onboardingCompleted to true for existing user');
+        currentPrefs.onboardingCompleted = true;
+      }
 
       // Create or update user data
       const updateData: any = {};
@@ -643,6 +683,7 @@ export class AppwriteAuthAdapter implements IAuthService {
         },
         lastLogin: updatedPrefs.lastLogin,
         isActive: updatedPrefs.isActive !== false,
+        onboardingCompleted: updatedPrefs.onboardingCompleted || false,
         createdAt: adminUser.$createdAt,
         updatedAt: adminUser.$updatedAt
       });
@@ -654,9 +695,9 @@ export class AppwriteAuthAdapter implements IAuthService {
         role: userDomain.role
       });
 
-      logger.info('OAuth2 callback handled successfully:', { userId, email: adminUser.email });
+      logger.info('OAuth2 callback handled successfully:', { userId, email: adminUser.email, isNewUser });
 
-      return { user: userDomain.toData(), session };
+      return { user: userDomain.toData(), session, isNewUser };
     } catch (error) {
       logger.error('OAuth2 callback failed:', error);
       throw new Error('OAuth2 authentication failed');
@@ -741,6 +782,14 @@ export class AppwriteAuthAdapter implements IAuthService {
       const appwriteUser = await this.users.get(userId);
       const userPrefs = appwriteUser.prefs as any;
 
+      // Migration: Ensure onboardingCompleted field exists for existing users
+      if (!('onboardingCompleted' in userPrefs)) {
+        console.log('🔄 Migrating user in getUserById - setting onboardingCompleted to true');
+        userPrefs.onboardingCompleted = true;
+        // Save the migration back to Appwrite
+        await this.users.updatePrefs(userId, userPrefs);
+      }
+
       return {
         $id: appwriteUser.$id,
         email: appwriteUser.email,
@@ -759,6 +808,7 @@ export class AppwriteAuthAdapter implements IAuthService {
         },
         lastLogin: userPrefs.lastLogin,
         isActive: userPrefs.isActive !== false,
+        onboardingCompleted: userPrefs.onboardingCompleted || false,
         createdAt: appwriteUser.$createdAt,
         updatedAt: appwriteUser.$updatedAt
       };
@@ -849,6 +899,7 @@ export class AppwriteAuthAdapter implements IAuthService {
             },
             lastLogin: userPrefs.lastLogin,
             isActive: userPrefs.isActive !== false,
+            onboardingCompleted: userPrefs.onboardingCompleted || false,
             createdAt: appwriteUser.$createdAt,
             updatedAt: appwriteUser.$updatedAt
           };
